@@ -12,6 +12,7 @@ import { GameCanvas } from './GameCanvas';
 import { HUD } from './HUD';
 import { useKeyboardInput } from './useKeyboardInput';
 import { soundEngine } from '../audio/SoundEngine';
+import { vibrateGamepad, VibrationPatterns } from '../audio/vibrationEngine';
 
 interface GameViewProps {
     seed: number;
@@ -128,23 +129,32 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
         for (const playerId of ['player1', 'player2'] as const) {
             const prevPlayer = prev.players[playerId];
             const currPlayer = curr.players[playerId];
+            const gamepadIndex = playerId === 'player1' ? 0 : 1;
 
-            // Collision sound
+            // Collision sound (metal scrape + impact) + vibration
             if (currPlayer.hp < prevPlayer.hp && currPlayer.state !== PlayerState.Dead) {
-                soundEngine.playImpact(currPlayer.hp === 1 ? 'heavy' : 'light');
+                const isHeavy = currPlayer.hp === 1;
+                soundEngine.playImpact(isHeavy ? 'heavy' : 'light');
+                soundEngine.playMetalScrape(isHeavy ? 'heavy' : 'light');
+                vibrateGamepad(
+                    gamepadIndex,
+                    isHeavy ? VibrationPatterns.collisionHeavy : VibrationPatterns.collision
+                );
             }
 
-            // Ascent sound
+            // Ascent sound + vibration
             if (
                 prevPlayer.state === PlayerState.Descending &&
                 currPlayer.state === PlayerState.Ascending
             ) {
                 soundEngine.playAscent();
+                vibrateGamepad(gamepadIndex, VibrationPatterns.eject);
             }
 
-            // Death sound
+            // Death sound + vibration
             if (prevPlayer.state !== PlayerState.Dead && currPlayer.state === PlayerState.Dead) {
                 soundEngine.playDeath();
+                vibrateGamepad(gamepadIndex, VibrationPatterns.death);
             }
 
             // Victory sound
@@ -155,14 +165,16 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
                 soundEngine.playVictory();
             }
 
-            // Rocket fire sound
+            // Rocket fire sound + vibration
             if (currPlayer.rocketsRemaining < prevPlayer.rocketsRemaining) {
                 soundEngine.playRocketLaunch();
+                vibrateGamepad(gamepadIndex, VibrationPatterns.rocketFire);
             }
 
-            // Mine deploy sound
+            // Mine deploy sound + vibration
             if (currPlayer.minesRemaining < prevPlayer.minesRemaining) {
                 soundEngine.playMineDeploy();
+                vibrateGamepad(gamepadIndex, VibrationPatterns.mineDeploy);
             }
         }
 
@@ -182,17 +194,33 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
         prevStateRef.current = curr;
     }, [gameState, audioInitialized]);
 
-    // Check for game over
-    useEffect(() => {
-        if (gameState.gameOver) {
-            onGameOver(gameState);
-        }
-    }, [gameState.gameOver, gameState, onGameOver]);
+    // Track game over state with delay
+    const [gameOverDelay, setGameOverDelay] = useState(false);
+    const gameOverTimeoutRef = useRef<number | undefined>(undefined);
 
-    // Cleanup audio on unmount
+    // Check for game over with delay
+    useEffect(() => {
+        if (gameState.gameOver && !gameOverDelay) {
+            // Start showing "GAME OVER" overlay
+            setGameOverDelay(true);
+            
+            // Delay before transitioning to results screen
+            gameOverTimeoutRef.current = window.setTimeout(() => {
+                onGameOver(gameState);
+            }, 3000); // 3 second delay
+        }
+        
+        return () => {
+            if (gameOverTimeoutRef.current) {
+                clearTimeout(gameOverTimeoutRef.current);
+            }
+        };
+    }, [gameState.gameOver, gameState, onGameOver, gameOverDelay]);
+
+    // Reset ambient sounds on unmount (keeps context for next game)
     useEffect(() => {
         return () => {
-            soundEngine.stop();
+            soundEngine.reset();
         };
     }, []);
 
@@ -278,6 +306,76 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
         >
             <GameCanvas gameState={gameState} width={dimensions.width} height={dimensions.height} />
             <HUD gameState={gameState} />
+
+            {/* Game Over overlay - shows for 3 seconds before results */}
+            {gameOverDelay && (
+                <div
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: 'rgba(0, 0, 0, 0.6)',
+                        zIndex: 100,
+                        animation: 'fadeIn 0.5s ease-out',
+                    }}
+                >
+                    <h1
+                        style={{
+                            fontSize: '72px',
+                            color: '#FF4444',
+                            marginBottom: '20px',
+                            textShadow: '0 0 30px rgba(255, 68, 68, 0.8), 0 0 60px rgba(255, 68, 68, 0.5)',
+                            animation: 'pulse 1s ease-in-out infinite',
+                            fontFamily: 'monospace',
+                            letterSpacing: '10px',
+                        }}
+                    >
+                        GAME OVER
+                    </h1>
+                    
+                    {gameState.winner && (
+                        <p
+                            style={{
+                                fontSize: '32px',
+                                color: gameState.winner === 'player1' ? '#FFA500' : '#00FF7F',
+                                textShadow: '0 0 15px currentColor',
+                                fontFamily: 'monospace',
+                            }}
+                        >
+                            🏆 {gameState.winner === 'player1' ? 'PLAYER 1' : 'PLAYER 2'} WINS! 🏆
+                        </p>
+                    )}
+                    
+                    <p
+                        style={{
+                            fontSize: '16px',
+                            color: '#888',
+                            marginTop: '40px',
+                            fontFamily: 'monospace',
+                        }}
+                    >
+                        Loading results...
+                    </p>
+                </div>
+            )}
+            <style>
+                {`
+                    @keyframes fadeIn {
+                        from { opacity: 0; }
+                        to { opacity: 1; }
+                    }
+                    @keyframes pulse {
+                        0%, 100% { transform: scale(1); }
+                        50% { transform: scale(1.05); }
+                    }
+                `}
+            </style>
 
             {/* Ready overlay - shows until both players press DOWN */}
             {!gameStarted && (

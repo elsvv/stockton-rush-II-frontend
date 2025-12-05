@@ -16,7 +16,7 @@ const defaultConfig = {
 };
 
 function createEmptyInput(frame: number): PlayerInputFrame {
-    return { frame, left: false, right: false, action: null };
+    return { frame, up: false, down: false, left: false, right: false, action: null };
 }
 
 function createInputs(

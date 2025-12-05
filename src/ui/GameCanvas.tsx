@@ -202,31 +202,33 @@ function getObstacleVisibility(
 /** Determine camera mode and viewports based on player states */
 function getCameraMode(players: Record<PlayerId, PlayerVehicle>): {
     mode: 'single' | 'split';
-    descendingPlayer: PlayerId | null;
-    ascendingPlayer: PlayerId | null;
+    topPlayer: PlayerId | null;
+    bottomPlayer: PlayerId | null;
 } {
     const p1 = players.player1;
     const p2 = players.player2;
 
+    const p1Active = p1.state === PlayerState.Ascending || p1.state === PlayerState.Descending;
+    const p2Active = p2.state === PlayerState.Ascending || p2.state === PlayerState.Descending;
     const p1Ascending = p1.state === PlayerState.Ascending;
     const p2Ascending = p2.state === PlayerState.Ascending;
-    const p1Descending = p1.state === PlayerState.Descending;
-    const p2Descending = p2.state === PlayerState.Descending;
 
-    // If one is ascending and one is descending, use split screen
-    if ((p1Ascending || p2Ascending) && (p1Descending || p2Descending)) {
+    // Split screen when both players are active AND at least one is ascending
+    // (meaning they are in different phases and need separate cameras)
+    if (p1Active && p2Active && (p1Ascending || p2Ascending) && !(p1Ascending && p2Ascending)) {
+        // Player 1 always on top, Player 2 always on bottom
         return {
             mode: 'split',
-            descendingPlayer: p1Descending ? 'player1' : 'player2',
-            ascendingPlayer: p1Ascending ? 'player1' : 'player2',
+            topPlayer: 'player1',
+            bottomPlayer: 'player2',
         };
     }
 
-    // Otherwise single view
+    // Otherwise single view - show whoever is active
     return {
         mode: 'single',
-        descendingPlayer: p1Descending ? 'player1' : p2Descending ? 'player2' : null,
-        ascendingPlayer: p1Ascending ? 'player1' : p2Ascending ? 'player2' : null,
+        topPlayer: p1Active ? 'player1' : p2Active ? 'player2' : null,
+        bottomPlayer: null,
     };
 }
 
@@ -1051,77 +1053,19 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
             // Split screen mode
             const halfHeight = height / 2;
 
-            // Top half: ascending player
-            if (cameraMode.ascendingPlayer) {
-                const ascPlayer = players[cameraMode.ascendingPlayer];
+            // Top half: Player 1
+            if (cameraMode.topPlayer) {
+                const topPlayerData = players[cameraMode.topPlayer];
+                const isAscending = topPlayerData.state === PlayerState.Ascending;
 
                 ctx.save();
                 ctx.beginPath();
                 ctx.rect(0, 0, width, halfHeight);
                 ctx.clip();
 
-                const cameraY = ascPlayer.y;
+                const cameraY = topPlayerData.y;
 
-                ctx.fillStyle = getWaterColor(ascPlayer.y);
-                ctx.fillRect(0, 0, width, halfHeight);
-
-                ctx.translate(0, -halfHeight / 2);
-
-                drawTitanic(ctx, cameraY, width, height);
-
-                // Flashlights (ascending capsule has no flashlight, but we draw for consistency)
-                drawFlashlight(ctx, players.player1, cameraY, height, cameraY);
-                drawFlashlight(ctx, players.player2, cameraY, height, cameraY);
-
-                for (const obstacle of obstacles) {
-                    const visibility = getObstacleVisibility(obstacle, players);
-                    drawObstacle(ctx, obstacle, cameraY, height, visibility);
-                }
-                for (const projectile of gameState.projectiles) {
-                    drawProjectile(ctx, projectile, cameraY, height, gameState.frame);
-                }
-                for (const pickup of gameState.pickups) {
-                    drawPickup(ctx, pickup, cameraY, height, gameState.frame);
-                }
-                drawPlayer(ctx, ascPlayer, cameraMode.ascendingPlayer, cameraY, height);
-
-                // Darkness overlay for ascending view
-                const darknessOpacity = getDarknessOverlay(ascPlayer.y);
-                if (darknessOpacity > 0) {
-                    ctx.translate(0, halfHeight / 2);
-                    ctx.fillStyle = `rgba(0, 0, 0, ${darknessOpacity})`;
-                    ctx.fillRect(0, 0, width, halfHeight);
-                }
-
-                ctx.restore();
-
-                ctx.fillStyle = COLORS.hud;
-                ctx.font = 'bold 16px monospace';
-                ctx.fillText('↑ ASCENDING', 10, 25);
-            }
-
-            // Divider line
-            ctx.strokeStyle = '#FFFFFF';
-            ctx.lineWidth = 3;
-            ctx.beginPath();
-            ctx.moveTo(0, halfHeight);
-            ctx.lineTo(width, halfHeight);
-            ctx.stroke();
-
-            // Bottom half: descending player
-            if (cameraMode.descendingPlayer) {
-                const descPlayer = players[cameraMode.descendingPlayer];
-
-                ctx.save();
-                ctx.beginPath();
-                ctx.rect(0, halfHeight, width, halfHeight);
-                ctx.clip();
-
-                const cameraY = descPlayer.y;
-
-                ctx.translate(0, halfHeight);
-
-                ctx.fillStyle = getWaterColor(descPlayer.y);
+                ctx.fillStyle = getWaterColor(topPlayerData.y);
                 ctx.fillRect(0, 0, width, halfHeight);
 
                 ctx.translate(0, -halfHeight / 2);
@@ -1142,10 +1086,10 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
                 for (const pickup of gameState.pickups) {
                     drawPickup(ctx, pickup, cameraY, height, gameState.frame);
                 }
-                drawPlayer(ctx, descPlayer, cameraMode.descendingPlayer, cameraY, height);
+                drawPlayer(ctx, topPlayerData, cameraMode.topPlayer, cameraY, height);
 
-                // Darkness overlay for descending view
-                const darknessOpacity = getDarknessOverlay(descPlayer.y);
+                // Darkness overlay
+                const darknessOpacity = getDarknessOverlay(topPlayerData.y);
                 if (darknessOpacity > 0) {
                     ctx.translate(0, halfHeight / 2);
                     ctx.fillStyle = `rgba(0, 0, 0, ${darknessOpacity})`;
@@ -1156,7 +1100,67 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
 
                 ctx.fillStyle = COLORS.hud;
                 ctx.font = 'bold 16px monospace';
-                ctx.fillText('↓ DESCENDING', 10, halfHeight + 25);
+                ctx.fillText(isAscending ? '↑ P1 ASCENDING' : '↓ P1 DESCENDING', 10, 25);
+            }
+
+            // Divider line
+            ctx.strokeStyle = '#FFFFFF';
+            ctx.lineWidth = 3;
+            ctx.beginPath();
+            ctx.moveTo(0, halfHeight);
+            ctx.lineTo(width, halfHeight);
+            ctx.stroke();
+
+            // Bottom half: Player 2
+            if (cameraMode.bottomPlayer) {
+                const bottomPlayerData = players[cameraMode.bottomPlayer];
+                const isAscending = bottomPlayerData.state === PlayerState.Ascending;
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.rect(0, halfHeight, width, halfHeight);
+                ctx.clip();
+
+                const cameraY = bottomPlayerData.y;
+
+                ctx.translate(0, halfHeight);
+
+                ctx.fillStyle = getWaterColor(bottomPlayerData.y);
+                ctx.fillRect(0, 0, width, halfHeight);
+
+                ctx.translate(0, -halfHeight / 2);
+
+                drawTitanic(ctx, cameraY, width, height);
+
+                // Flashlights
+                drawFlashlight(ctx, players.player1, cameraY, height, cameraY);
+                drawFlashlight(ctx, players.player2, cameraY, height, cameraY);
+
+                for (const obstacle of obstacles) {
+                    const visibility = getObstacleVisibility(obstacle, players);
+                    drawObstacle(ctx, obstacle, cameraY, height, visibility);
+                }
+                for (const projectile of gameState.projectiles) {
+                    drawProjectile(ctx, projectile, cameraY, height, gameState.frame);
+                }
+                for (const pickup of gameState.pickups) {
+                    drawPickup(ctx, pickup, cameraY, height, gameState.frame);
+                }
+                drawPlayer(ctx, bottomPlayerData, cameraMode.bottomPlayer, cameraY, height);
+
+                // Darkness overlay
+                const darknessOpacity = getDarknessOverlay(bottomPlayerData.y);
+                if (darknessOpacity > 0) {
+                    ctx.translate(0, halfHeight / 2);
+                    ctx.fillStyle = `rgba(0, 0, 0, ${darknessOpacity})`;
+                    ctx.fillRect(0, 0, width, halfHeight);
+                }
+
+                ctx.restore();
+
+                ctx.fillStyle = COLORS.hud;
+                ctx.font = 'bold 16px monospace';
+                ctx.fillText(isAscending ? '↑ P2 ASCENDING' : '↓ P2 DESCENDING', 10, halfHeight + 25);
             }
         }
 

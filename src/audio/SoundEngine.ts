@@ -80,7 +80,7 @@ export class SoundEngine {
         rumbleOsc.start();
         rumbleLFO.start();
 
-        this.ambientNodes.push(rumbleOsc, rumbleLFO);
+        this.ambientNodes.push(rumbleOsc, rumbleLFO, rumbleGain, rumbleLFOGain);
 
         // Water movement - filtered noise
         const noiseBuffer = this.createNoiseBuffer(2);
@@ -108,8 +108,9 @@ export class SoundEngine {
         noiseSource.connect(noiseFilter);
         noiseFilter.connect(noiseGain);
         noiseGain.connect(this.depthFilter);
-        noiseSource.start();
         noiseLFO.start();
+
+        this.ambientNodes.push(noiseSource, noiseLFO, noiseFilter, noiseGain, noiseLFOGain);
 
         // Occasional bubbles/clicks
         this.scheduleBubbles();
@@ -297,6 +298,68 @@ export class SoundEngine {
 
         // Echo after delay
         setTimeout(() => this.playEcho(), 300 + Math.random() * 200);
+    }
+
+    /**
+     * Play metal scrape/collision sound (underwater metal impact).
+     */
+    playMetalScrape(intensity: 'light' | 'heavy' = 'light'): void {
+        if (!this.audioContext || !this.masterGain) return;
+
+        const now = this.audioContext.currentTime;
+        const isHeavy = intensity === 'heavy';
+
+        // Noise burst for scraping texture
+        const noiseBuffer = this.createNoiseBuffer(isHeavy ? 0.4 : 0.25);
+        const noise = this.audioContext.createBufferSource();
+        noise.buffer = noiseBuffer;
+
+        // Bandpass filter for metallic character
+        const filter = this.audioContext.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = isHeavy ? 600 : 900;
+        filter.Q.value = 3;
+
+        // Resonant high filter for metallic ring
+        const highFilter = this.audioContext.createBiquadFilter();
+        highFilter.type = 'highpass';
+        highFilter.frequency.value = 1500;
+        highFilter.Q.value = 5;
+
+        const gain = this.audioContext.createGain();
+        gain.gain.value = isHeavy ? 0.35 : 0.2;
+
+        noise.connect(filter);
+        filter.connect(highFilter);
+        highFilter.connect(gain);
+        gain.connect(this.masterGain);
+
+        // Frequency sweep for scraping effect
+        filter.frequency.linearRampToValueAtTime(
+            isHeavy ? 300 : 500,
+            now + (isHeavy ? 0.3 : 0.2)
+        );
+        gain.gain.exponentialRampToValueAtTime(0.001, now + (isHeavy ? 0.4 : 0.25));
+
+        noise.start(now);
+        noise.stop(now + (isHeavy ? 0.4 : 0.25));
+
+        // Add metallic ping
+        const ping = this.audioContext.createOscillator();
+        ping.type = 'sine';
+        ping.frequency.value = isHeavy ? 180 : 250;
+
+        const pingGain = this.audioContext.createGain();
+        pingGain.gain.value = isHeavy ? 0.2 : 0.12;
+
+        ping.connect(pingGain);
+        pingGain.connect(this.masterGain);
+
+        ping.frequency.exponentialRampToValueAtTime(80, now + 0.15);
+        pingGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+        ping.start(now);
+        ping.stop(now + 0.2);
     }
 
     /**
@@ -649,14 +712,57 @@ export class SoundEngine {
     }
 
     /**
-     * Stop all audio.
+     * Stop all audio completely (for cleanup).
      */
     stop(): void {
+        // Stop all ambient nodes
+        this.stopAmbient();
+        
         if (this.audioContext) {
             this.audioContext.close();
             this.audioContext = null;
         }
+        this.masterGain = null;
+        this.ambientGain = null;
+        this.depthFilter = null;
         this.isInitialized = false;
+    }
+
+    /**
+     * Stop ambient sounds but keep audio context alive (for game restart).
+     */
+    stopAmbient(): void {
+        for (const node of this.ambientNodes) {
+            try {
+                if (node instanceof OscillatorNode || node instanceof AudioBufferSourceNode) {
+                    node.stop();
+                }
+                node.disconnect();
+            } catch {
+                // Node already stopped or disconnected
+            }
+        }
+        this.ambientNodes = [];
+    }
+
+    /**
+     * Reset audio for new game (keeps context, restarts ambient sounds).
+     */
+    reset(): void {
+        this.stopAmbient();
+        this.currentDepth = 0;
+        
+        // Restart ambient sounds if context exists
+        if (this.audioContext && this.depthFilter) {
+            this.createAmbientSounds();
+        }
+    }
+
+    /**
+     * Check if audio is initialized.
+     */
+    isReady(): boolean {
+        return this.isInitialized;
     }
 }
 

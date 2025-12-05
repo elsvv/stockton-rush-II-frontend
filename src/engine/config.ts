@@ -81,8 +81,8 @@ export const COLLISION_DAMAGE: Record<ObstacleType, number> = {
 export const INVINCIBILITY_FRAMES = 120; // 2 seconds (more forgiving)
 
 /** Base obstacle spawn rate (obstacles per 100 depth units) - scales with depth */
-export const OBSTACLE_DENSITY_MIN = 0.8; // At surface (very few)
-export const OBSTACLE_DENSITY_MAX = 3.0; // At max depth (still manageable)
+export const OBSTACLE_DENSITY_MIN = 1.2; // At surface (was 0.8)
+export const OBSTACLE_DENSITY_MAX = 4.0; // At max depth (was 3.0)
 
 /** Minimum gap between obstacles for player passage */
 export const MIN_PASSAGE_WIDTH = 100; // Ensure players can always pass
@@ -107,7 +107,7 @@ export const ROCKET_HEIGHT = 8;
 export const MINE_SIZE = 25;
 
 /** HP Pickup configuration */
-export const HP_PICKUP_CHANCE = 0.0003; // Very rare - about 1 per 300m
+export const HP_PICKUP_CHANCE = 0.00015; // Rarer (was 0.0003) - about 1 per 600m
 export const HP_PICKUP_SIZE = 20;
 export const HP_PICKUP_HEAL = 1;
 
@@ -124,7 +124,7 @@ export const TURTLE_MAX_DEPTH = 8000;
 
 /** Obstacle size ranges */
 export const OBSTACLE_SIZE = {
-    [ObstacleType.Coral]: { minW: 30, maxW: 60, minH: 25, maxH: 50 },
+    [ObstacleType.Coral]: { minW: 40, maxW: 80, minH: 35, maxH: 70 }, // Larger corals
     [ObstacleType.IceBlock]: { minW: 40, maxW: 80, minH: 30, maxH: 60 },
     [ObstacleType.SeaTurtle]: { minW: 35, maxW: 55, minH: 25, maxH: 40 },
 };
