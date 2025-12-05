@@ -102,6 +102,35 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
         }
     }, [audioInitialized]);
 
+    // Auto-initialize audio on first keypress or gamepad input
+    useEffect(() => {
+        if (audioInitialized) return;
+
+        const handleKeyDown = () => {
+            initAudio();
+        };
+
+        const handleGamepad = () => {
+            const gamepads = navigator.getGamepads();
+            for (const gp of gamepads) {
+                if (gp && gp.buttons.some(b => b.pressed)) {
+                    initAudio();
+                    break;
+                }
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown, { once: true });
+        
+        // Poll for gamepad input
+        const gamepadInterval = setInterval(handleGamepad, 100);
+
+        return () => {
+            window.removeEventListener('keydown', handleKeyDown);
+            clearInterval(gamepadInterval);
+        };
+    }, [audioInitialized, initAudio]);
+
     // Request fullscreen
     const requestFullscreen = useCallback(async () => {
         try {

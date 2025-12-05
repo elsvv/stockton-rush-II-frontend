@@ -133,7 +133,7 @@ export const OBSTACLE_SIZE = {
 export const TURTLE_SPEED = 30;
 
 /** Angler Fish configuration */
-export const ANGLER_FISH_MIN_DEPTH = 2000; // Start appearing at 2000m
+export const ANGLER_FISH_MIN_DEPTH = 1000; // Start appearing at 1000m
 export const ANGLER_FISH_SPAWN_CHANCE = 0.0005; // Spawn chance per frame per depth unit
 export const ANGLER_FISH_WIDTH = 35; // Slightly smaller than submarine
 export const ANGLER_FISH_HEIGHT = 25;
