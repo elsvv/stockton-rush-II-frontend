@@ -496,6 +496,150 @@ export class SoundEngine {
     }
 
     /**
+     * Play rocket launch sound.
+     */
+    playRocketLaunch(): void {
+        if (!this.audioContext || !this.masterGain) return;
+
+        const now = this.audioContext.currentTime;
+
+        // Whoosh sound
+        const noiseBuffer = this.createNoiseBuffer(0.3);
+        const noise = this.audioContext.createBufferSource();
+        noise.buffer = noiseBuffer;
+
+        const filter = this.audioContext.createBiquadFilter();
+        filter.type = 'bandpass';
+        filter.frequency.value = 1000;
+        filter.Q.value = 2;
+
+        const gain = this.audioContext.createGain();
+        gain.gain.value = 0.4;
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.masterGain);
+
+        // Sweep up
+        filter.frequency.linearRampToValueAtTime(3000, now + 0.15);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+
+        noise.start(now);
+        noise.stop(now + 0.3);
+
+        // Ignition pop
+        const pop = this.audioContext.createOscillator();
+        pop.type = 'sine';
+        pop.frequency.value = 200;
+
+        const popGain = this.audioContext.createGain();
+        popGain.gain.value = 0.5;
+
+        pop.connect(popGain);
+        popGain.connect(this.masterGain);
+
+        pop.frequency.exponentialRampToValueAtTime(50, now + 0.05);
+        popGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+        pop.start(now);
+        pop.stop(now + 0.1);
+    }
+
+    /**
+     * Play mine deploy sound.
+     */
+    playMineDeploy(): void {
+        if (!this.audioContext || !this.masterGain) return;
+
+        const now = this.audioContext.currentTime;
+
+        // Metal clunk
+        const clunk = this.audioContext.createOscillator();
+        clunk.type = 'sine';
+        clunk.frequency.value = 150;
+
+        const clunkGain = this.audioContext.createGain();
+        clunkGain.gain.value = 0.4;
+
+        clunk.connect(clunkGain);
+        clunkGain.connect(this.masterGain);
+
+        clunk.frequency.exponentialRampToValueAtTime(60, now + 0.1);
+        clunkGain.gain.exponentialRampToValueAtTime(0.001, now + 0.2);
+
+        clunk.start(now);
+        clunk.stop(now + 0.2);
+
+        // Arming beep
+        const beep = this.audioContext.createOscillator();
+        beep.type = 'sine';
+        beep.frequency.value = 1200;
+
+        const beepGain = this.audioContext.createGain();
+        beepGain.gain.value = 0.2;
+
+        beep.connect(beepGain);
+        beepGain.connect(this.masterGain);
+
+        beepGain.gain.setValueAtTime(0.2, now + 0.15);
+        beepGain.gain.setValueAtTime(0, now + 0.2);
+        beepGain.gain.setValueAtTime(0.2, now + 0.25);
+        beepGain.gain.exponentialRampToValueAtTime(0.001, now + 0.35);
+
+        beep.start(now + 0.15);
+        beep.stop(now + 0.35);
+    }
+
+    /**
+     * Play explosion sound (for projectile hits).
+     */
+    playExplosion(intensity: 'small' | 'large' = 'small'): void {
+        if (!this.audioContext || !this.masterGain) return;
+
+        const now = this.audioContext.currentTime;
+        const isLarge = intensity === 'large';
+
+        // Explosion rumble
+        const noiseBuffer = this.createNoiseBuffer(isLarge ? 0.6 : 0.3);
+        const noise = this.audioContext.createBufferSource();
+        noise.buffer = noiseBuffer;
+
+        const filter = this.audioContext.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = isLarge ? 400 : 600;
+
+        const gain = this.audioContext.createGain();
+        gain.gain.value = isLarge ? 0.6 : 0.4;
+
+        noise.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.masterGain);
+
+        filter.frequency.exponentialRampToValueAtTime(100, now + (isLarge ? 0.4 : 0.2));
+        gain.gain.exponentialRampToValueAtTime(0.001, now + (isLarge ? 0.6 : 0.3));
+
+        noise.start(now);
+        noise.stop(now + (isLarge ? 0.6 : 0.3));
+
+        // Initial bang
+        const bang = this.audioContext.createOscillator();
+        bang.type = 'sine';
+        bang.frequency.value = isLarge ? 80 : 120;
+
+        const bangGain = this.audioContext.createGain();
+        bangGain.gain.value = isLarge ? 0.7 : 0.5;
+
+        bang.connect(bangGain);
+        bangGain.connect(this.masterGain);
+
+        bang.frequency.exponentialRampToValueAtTime(20, now + 0.1);
+        bangGain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+
+        bang.start(now);
+        bang.stop(now + 0.15);
+    }
+
+    /**
      * Set master volume.
      */
     setVolume(volume: number): void {

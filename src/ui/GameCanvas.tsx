@@ -5,8 +5,15 @@
  */
 
 import { useRef, useEffect, useCallback } from 'react';
-import type { GameState, PlayerVehicle, Obstacle, PlayerId, Passenger } from '../engine/types';
-import { PlayerState, ObstacleType } from '../engine/types';
+import type {
+    GameState,
+    PlayerVehicle,
+    Obstacle,
+    PlayerId,
+    Passenger,
+    Projectile,
+} from '../engine/types';
+import { PlayerState, ObstacleType, ProjectileType } from '../engine/types';
 import { COLORS, MAX_DEPTH, TITANIC_DEPTH, PASSENGER_COUNT } from '../engine/config';
 
 interface GameCanvasProps {
@@ -488,6 +495,136 @@ function drawTitanic(
     ctx.restore();
 }
 
+/** Draw a projectile (rocket or mine) */
+function drawProjectile(
+    ctx: CanvasRenderingContext2D,
+    projectile: Projectile,
+    cameraY: number,
+    canvasHeight: number,
+    frame: number
+) {
+    if (!projectile.active) return;
+
+    const screenY = projectile.y - cameraY + canvasHeight / 2;
+
+    ctx.save();
+
+    if (projectile.type === ProjectileType.Rocket) {
+        // Rocket body
+        const isMovingRight = projectile.velocityX > 0;
+
+        // Rocket trail
+        ctx.fillStyle = 'rgba(255, 200, 100, 0.6)';
+        const trailX = isMovingRight ? projectile.x - 15 : projectile.x + projectile.width;
+        ctx.beginPath();
+        ctx.ellipse(
+            trailX,
+            screenY + projectile.height / 2,
+            12 + Math.sin(frame * 0.5) * 3,
+            5,
+            0,
+            0,
+            Math.PI * 2
+        );
+        ctx.fill();
+
+        // Rocket body - red with metallic look
+        const gradient = ctx.createLinearGradient(
+            projectile.x,
+            screenY,
+            projectile.x,
+            screenY + projectile.height
+        );
+        gradient.addColorStop(0, '#FF4444');
+        gradient.addColorStop(0.5, '#CC2222');
+        gradient.addColorStop(1, '#AA0000');
+        ctx.fillStyle = gradient;
+
+        ctx.beginPath();
+        if (isMovingRight) {
+            ctx.moveTo(projectile.x, screenY + projectile.height / 2);
+            ctx.lineTo(projectile.x + projectile.width - 5, screenY);
+            ctx.lineTo(projectile.x + projectile.width, screenY + projectile.height / 2);
+            ctx.lineTo(projectile.x + projectile.width - 5, screenY + projectile.height);
+        } else {
+            ctx.moveTo(projectile.x + projectile.width, screenY + projectile.height / 2);
+            ctx.lineTo(projectile.x + 5, screenY);
+            ctx.lineTo(projectile.x, screenY + projectile.height / 2);
+            ctx.lineTo(projectile.x + 5, screenY + projectile.height);
+        }
+        ctx.closePath();
+        ctx.fill();
+
+        // Rocket fins
+        ctx.fillStyle = '#880000';
+        if (isMovingRight) {
+            ctx.fillRect(projectile.x, screenY - 2, 4, projectile.height + 4);
+        } else {
+            ctx.fillRect(
+                projectile.x + projectile.width - 4,
+                screenY - 2,
+                4,
+                projectile.height + 4
+            );
+        }
+    } else if (projectile.type === ProjectileType.Mine) {
+        // Mine - pulsing sphere with spikes
+        const pulse = 1 + Math.sin(frame * 0.3) * 0.1;
+        const size = (projectile.width / 2) * pulse;
+
+        // Mine body
+        const gradient = ctx.createRadialGradient(
+            projectile.x + projectile.width / 2,
+            screenY + projectile.height / 2,
+            0,
+            projectile.x + projectile.width / 2,
+            screenY + projectile.height / 2,
+            size
+        );
+        gradient.addColorStop(0, '#444');
+        gradient.addColorStop(0.7, '#222');
+        gradient.addColorStop(1, '#000');
+        ctx.fillStyle = gradient;
+
+        ctx.beginPath();
+        ctx.arc(
+            projectile.x + projectile.width / 2,
+            screenY + projectile.height / 2,
+            size,
+            0,
+            Math.PI * 2
+        );
+        ctx.fill();
+
+        // Spikes
+        ctx.fillStyle = '#666';
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2;
+            const spikeX = projectile.x + projectile.width / 2 + Math.cos(angle) * size;
+            const spikeY = screenY + projectile.height / 2 + Math.sin(angle) * size;
+            ctx.beginPath();
+            ctx.arc(spikeX, spikeY, 3, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        // Blinking red light
+        if (frame % 30 < 15) {
+            ctx.fillStyle = '#FF0000';
+            ctx.beginPath();
+            ctx.arc(
+                projectile.x + projectile.width / 2,
+                screenY + projectile.height / 2,
+                4,
+                0,
+                Math.PI * 2
+            );
+            ctx.fill();
+        }
+    }
+
+    ctx.restore();
+}
+
 /** Draw a player (submarine or capsule) based on their state */
 function drawPlayer(
     ctx: CanvasRenderingContext2D,
@@ -592,6 +729,11 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
                 drawObstacle(ctx, obstacle, focusDepth, height);
             }
 
+            // Draw projectiles
+            for (const projectile of gameState.projectiles) {
+                drawProjectile(ctx, projectile, focusDepth, height, gameState.frame);
+            }
+
             // Draw players
             drawPlayer(ctx, players.player1, 'player1', focusDepth, height);
             drawPlayer(ctx, players.player2, 'player2', focusDepth, height);
@@ -625,6 +767,9 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
                 drawTitanic(ctx, cameraY, width, height);
                 for (const obstacle of obstacles) {
                     drawObstacle(ctx, obstacle, cameraY, height);
+                }
+                for (const projectile of gameState.projectiles) {
+                    drawProjectile(ctx, projectile, cameraY, height, gameState.frame);
                 }
                 drawPlayer(ctx, ascPlayer, cameraMode.ascendingPlayer, cameraY, height);
 
@@ -672,6 +817,9 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
                 drawTitanic(ctx, cameraY, width, height);
                 for (const obstacle of obstacles) {
                     drawObstacle(ctx, obstacle, cameraY, height);
+                }
+                for (const projectile of gameState.projectiles) {
+                    drawProjectile(ctx, projectile, cameraY, height, gameState.frame);
                 }
                 drawPlayer(ctx, descPlayer, cameraMode.descendingPlayer, cameraY, height);
 

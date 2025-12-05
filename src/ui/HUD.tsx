@@ -195,6 +195,36 @@ function PlayerHUD({
 
                     {/* Wear gauge - only for submarine */}
                     {player.state === PlayerState.Descending && <WearGauge wear={player.wear} />}
+
+                    {/* Weapons - only for submarine */}
+                    {player.state === PlayerState.Descending && (
+                        <div style={{ marginTop: '12px', display: 'flex', gap: '12px' }}>
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    color: player.rocketsRemaining > 0 ? '#FF6644' : '#555',
+                                }}
+                            >
+                                <span style={{ fontSize: '16px' }}>🚀</span>
+                                <span style={{ fontWeight: 'bold' }}>
+                                    ×{player.rocketsRemaining}
+                                </span>
+                            </div>
+                            <div
+                                style={{
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    gap: '4px',
+                                    color: player.minesRemaining > 0 ? '#FF4444' : '#555',
+                                }}
+                            >
+                                <span style={{ fontSize: '16px' }}>💣</span>
+                                <span style={{ fontWeight: 'bold' }}>×{player.minesRemaining}</span>
+                            </div>
+                        </div>
+                    )}
                 </>
             )}
 

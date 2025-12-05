@@ -66,6 +66,186 @@ function createPassengers(): Passenger[] {
     }));
 }
 
+/** Generate a unique projectile ID */
+let projectileIdCounter = 0;
+function generateProjectileId(): string {
+    return `proj_${projectileIdCounter++}`;
+}
+
+/** Create a rocket projectile */
+function createRocket(
+    ownerId: PlayerId,
+    x: number,
+    y: number,
+    _targetPlayerId: PlayerId, // Used for direction calculation
+    targetX: number
+): Projectile {
+    // Rocket flies horizontally towards the other player
+    const direction = targetX > x ? 1 : -1;
+    return {
+        id: generateProjectileId(),
+        type: ProjectileType.Rocket,
+        ownerId,
+        x: x + (direction > 0 ? 80 : -ROCKET_WIDTH), // Fire from front of sub
+        y: y + 20, // Center of sub
+        width: ROCKET_WIDTH,
+        height: ROCKET_HEIGHT,
+        velocityX: direction * ROCKET_SPEED,
+        velocityY: 0,
+        damage: SMALL_ROCKET_DAMAGE,
+        lifetime: 300, // 5 seconds
+        active: true,
+    };
+}
+
+/** Create a mine (stationary) */
+function createMine(ownerId: PlayerId, x: number, y: number): Projectile {
+    return {
+        id: generateProjectileId(),
+        type: ProjectileType.Mine,
+        ownerId,
+        x: x + 30,
+        y: y + 50, // Place slightly below the sub
+        width: MINE_SIZE,
+        height: MINE_SIZE,
+        velocityX: 0,
+        velocityY: 0,
+        damage: MINE_DAMAGE,
+        lifetime: MINE_LIFETIME,
+        active: true,
+    };
+}
+
+/** Update projectiles - movement, lifetime, remove inactive */
+function updateProjectiles(projectiles: Projectile[], dt: number): Projectile[] {
+    return projectiles
+        .map((p) => {
+            if (!p.active) return p;
+            return {
+                ...p,
+                x: p.x + p.velocityX * dt,
+                y: p.y + p.velocityY * dt,
+                lifetime: p.lifetime - 1,
+                active: p.lifetime > 1,
+            };
+        })
+        .filter((p) => p.active && p.lifetime > 0);
+}
+
+/** Check projectile collisions with players and obstacles */
+function checkProjectileCollisions(
+    projectiles: Projectile[],
+    players: Record<PlayerId, PlayerVehicle>,
+    obstacles: Obstacle[]
+): {
+    projectiles: Projectile[];
+    players: Record<PlayerId, PlayerVehicle>;
+    obstacles: Obstacle[];
+    hits: Array<{ projectileId: string; targetType: 'player' | 'obstacle'; targetId: string }>;
+} {
+    let updatedProjectiles = [...projectiles];
+    let updatedPlayers = { ...players };
+    let updatedObstacles = [...obstacles];
+    const hits: Array<{
+        projectileId: string;
+        targetType: 'player' | 'obstacle';
+        targetId: string;
+    }> = [];
+
+    for (const proj of projectiles) {
+        if (!proj.active) continue;
+
+        const projBox: AABB = {
+            x: proj.x,
+            y: proj.y,
+            width: proj.width,
+            height: proj.height,
+        };
+
+        // Check collision with obstacles first (can block projectiles)
+        for (let i = 0; i < updatedObstacles.length; i++) {
+            const obs = updatedObstacles[i];
+            if (!obs.active) continue;
+
+            const obsBox: AABB = {
+                x: obs.x,
+                y: obs.y,
+                width: obs.width,
+                height: obs.height,
+            };
+
+            if (checkAABBCollision(projBox, obsBox)) {
+                // Projectile hits obstacle - both are destroyed
+                updatedProjectiles = updatedProjectiles.map((p) =>
+                    p.id === proj.id ? { ...p, active: false } : p
+                );
+                updatedObstacles[i] = { ...obs, active: false };
+                hits.push({ projectileId: proj.id, targetType: 'obstacle', targetId: obs.id });
+                break; // Projectile is destroyed, stop checking
+            }
+        }
+
+        // Check if projectile is still active after obstacle check
+        const stillActive = updatedProjectiles.find((p) => p.id === proj.id)?.active;
+        if (!stillActive) continue;
+
+        // Check collision with enemy player
+        const enemyId: PlayerId = proj.ownerId === 'player1' ? 'player2' : 'player1';
+        const enemy = updatedPlayers[enemyId];
+
+        // Skip if enemy is dead or has invincibility
+        if (enemy.state === PlayerState.Dead || enemy.state === PlayerState.Escaped) continue;
+        if (enemy.invincibilityFrames > 0) continue;
+
+        const enemyBox: AABB = {
+            x: enemy.x,
+            y: enemy.y,
+            width: enemy.width,
+            height: enemy.height,
+        };
+
+        if (checkAABBCollision(projBox, enemyBox)) {
+            // Projectile hits enemy player
+            updatedProjectiles = updatedProjectiles.map((p) =>
+                p.id === proj.id ? { ...p, active: false } : p
+            );
+
+            const prevHp = enemy.hp;
+            let newEnemy = {
+                ...enemy,
+                hp: Math.max(0, enemy.hp - proj.damage),
+                invincibilityFrames: INVINCIBILITY_FRAMES,
+            };
+
+            // Kill passengers for each HP lost
+            for (let i = 0; i < prevHp - newEnemy.hp; i++) {
+                newEnemy.passengers = killPassenger(newEnemy.passengers);
+            }
+
+            // Check for death
+            if (newEnemy.hp <= 0) {
+                newEnemy = {
+                    ...newEnemy,
+                    state: PlayerState.Dead,
+                    deathCause: DeathCause.Imploded,
+                    implosionFrame: 1,
+                    passengers: newEnemy.passengers.map((p) => ({ ...p, alive: false })),
+                };
+            }
+
+            updatedPlayers[enemyId] = newEnemy;
+            hits.push({ projectileId: proj.id, targetType: 'player', targetId: enemyId });
+        }
+    }
+
+    return {
+        projectiles: updatedProjectiles.filter((p) => p.active),
+        players: updatedPlayers,
+        obstacles: updatedObstacles,
+        hits,
+    };
+}
+
 /**
  * Create the initial game state from configuration.
  * This is the starting point for any game session.
@@ -459,14 +639,93 @@ export function updateGameState(
     const allCollidedIds = new Set([...p1Result.collidedObstacles, ...p2Result.collidedObstacles]);
     obstacles = obstacles.map((o) => (allCollidedIds.has(o.id) ? { ...o, active: false } : o));
 
-    // Update current max depth
-    const newMaxDepth = Math.max(state.currentMaxDepth, p1Result.player.y, p2Result.player.y);
+    // Handle projectile creation
+    let newProjectiles = [...state.projectiles];
 
-    // Create new state
-    const newPlayers = {
+    // Player 1 fires rocket
+    if (
+        inputs.player1.action === 'fireRocket' &&
+        p1Result.player.rocketsRemaining > 0 &&
+        p1Result.player.state === PlayerState.Descending
+    ) {
+        const rocket = createRocket(
+            'player1',
+            p1Result.player.x,
+            p1Result.player.y,
+            'player2',
+            p2Result.player.x
+        );
+        newProjectiles.push(rocket);
+        p1Result.player = {
+            ...p1Result.player,
+            rocketsRemaining: p1Result.player.rocketsRemaining - 1,
+        };
+    }
+
+    // Player 1 deploys mine
+    if (
+        inputs.player1.action === 'deployMine' &&
+        p1Result.player.minesRemaining > 0 &&
+        p1Result.player.state === PlayerState.Descending
+    ) {
+        const mine = createMine('player1', p1Result.player.x, p1Result.player.y);
+        newProjectiles.push(mine);
+        p1Result.player = {
+            ...p1Result.player,
+            minesRemaining: p1Result.player.minesRemaining - 1,
+        };
+    }
+
+    // Player 2 fires rocket
+    if (
+        inputs.player2.action === 'fireRocket' &&
+        p2Result.player.rocketsRemaining > 0 &&
+        p2Result.player.state === PlayerState.Descending
+    ) {
+        const rocket = createRocket(
+            'player2',
+            p2Result.player.x,
+            p2Result.player.y,
+            'player1',
+            p1Result.player.x
+        );
+        newProjectiles.push(rocket);
+        p2Result.player = {
+            ...p2Result.player,
+            rocketsRemaining: p2Result.player.rocketsRemaining - 1,
+        };
+    }
+
+    // Player 2 deploys mine
+    if (
+        inputs.player2.action === 'deployMine' &&
+        p2Result.player.minesRemaining > 0 &&
+        p2Result.player.state === PlayerState.Descending
+    ) {
+        const mine = createMine('player2', p2Result.player.x, p2Result.player.y);
+        newProjectiles.push(mine);
+        p2Result.player = {
+            ...p2Result.player,
+            minesRemaining: p2Result.player.minesRemaining - 1,
+        };
+    }
+
+    // Update projectile positions
+    newProjectiles = updateProjectiles(newProjectiles, dt);
+
+    // Check projectile collisions
+    let newPlayers = {
         player1: p1Result.player,
         player2: p2Result.player,
     };
+
+    const collisionResult = checkProjectileCollisions(newProjectiles, newPlayers, obstacles);
+    newProjectiles = collisionResult.projectiles;
+    newPlayers = collisionResult.players;
+    obstacles = collisionResult.obstacles;
+
+    // Update current max depth
+    const newMaxDepth = Math.max(state.currentMaxDepth, newPlayers.player1.y, newPlayers.player2.y);
 
     const gameOver = isGameOver(newPlayers);
     const winner = gameOver ? determineWinner(newPlayers) : null;
@@ -479,8 +738,8 @@ export function updateGameState(
         introProgress: state.introProgress,
         players: newPlayers,
         obstacles,
-        projectiles: state.projectiles, // TODO: Update projectiles
-        pickups: state.pickups, // TODO: Update pickups
+        projectiles: newProjectiles,
+        pickups: state.pickups,
         gameOver,
         winner,
         generatedDepth,

@@ -125,6 +125,29 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
             ) {
                 soundEngine.playVictory();
             }
+
+            // Rocket fire sound
+            if (currPlayer.rocketsRemaining < prevPlayer.rocketsRemaining) {
+                soundEngine.playRocketLaunch();
+            }
+
+            // Mine deploy sound
+            if (currPlayer.minesRemaining < prevPlayer.minesRemaining) {
+                soundEngine.playMineDeploy();
+            }
+        }
+
+        // Check for projectile hits (new projectiles destroyed = explosion)
+        const prevProjectileCount = prev.projectiles.length;
+        const currProjectileCount = curr.projectiles.length;
+
+        // If projectiles were removed but not just by timing out, play explosion
+        // This is a simplified check - we look for decrease in projectile count
+        if (prevProjectileCount > currProjectileCount) {
+            const removedCount = prevProjectileCount - currProjectileCount;
+            for (let i = 0; i < Math.min(removedCount, 3); i++) {
+                setTimeout(() => soundEngine.playExplosion('small'), i * 50);
+            }
         }
 
         prevStateRef.current = curr;
