@@ -211,17 +211,25 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
             <div
                 style={{
                     position: 'absolute',
-                    bottom: 50,
+                    bottom: 20,
                     left: '50%',
                     transform: 'translateX(-50%)',
-                    color: 'rgba(255, 255, 255, 0.4)',
+                    color: 'rgba(255, 255, 255, 0.5)',
                     fontFamily: 'monospace',
-                    fontSize: '14px',
+                    fontSize: '12px',
                     textAlign: 'center',
                     pointerEvents: 'none',
+                    backgroundColor: 'rgba(0,0,0,0.5)',
+                    padding: '10px 20px',
+                    borderRadius: '8px',
                 }}
             >
-                <div>P1: A/D + W to escape | P2: ←/→ + ↑ to escape</div>
+                <div style={{ marginBottom: '4px' }}>
+                    <strong>P1:</strong> WASD move | Q eject | E rocket | R mine
+                </div>
+                <div>
+                    <strong>P2:</strong> Arrows move | / eject | . rocket | , mine
+                </div>
             </div>
 
             {/* Fullscreen button */}

@@ -40,7 +40,7 @@ export const DeathCause = {
 export type DeathCause = (typeof DeathCause)[keyof typeof DeathCause];
 
 /** Action that can be taken by a player */
-export type PlayerAction = 'dumpBallast' | null;
+export type PlayerAction = 'dumpBallast' | 'fireRocket' | 'deployMine' | null;
 
 /**
  * Input state for a single frame for one player.
@@ -50,7 +50,45 @@ export interface PlayerInputFrame {
     frame: number;
     left: boolean;
     right: boolean;
+    up: boolean;
+    down: boolean;
     action: PlayerAction;
+}
+
+/** Projectile types */
+export const ProjectileType = {
+    Rocket: 'rocket',
+    Mine: 'mine',
+} as const;
+export type ProjectileType = (typeof ProjectileType)[keyof typeof ProjectileType];
+
+/**
+ * Projectile (rocket or mine) in the game world.
+ */
+export interface Projectile {
+    id: string;
+    type: ProjectileType;
+    ownerId: PlayerId;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    velocityX: number;
+    velocityY: number;
+    damage: number;
+    lifetime: number; // Frames remaining (for mines)
+    active: boolean;
+}
+
+/**
+ * HP Pickup in the game world.
+ */
+export interface HPPickup {
+    id: string;
+    x: number;
+    y: number;
+    size: number;
+    active: boolean;
 }
 
 /**
@@ -85,6 +123,7 @@ export interface PlayerVehicle {
     x: number; // Horizontal position
     y: number; // Depth (positive = deeper)
     velocityX: number; // For physics calculations
+    velocityY: number; // Vertical velocity
     width: number;
     height: number;
     hp: number;
@@ -95,6 +134,8 @@ export interface PlayerVehicle {
     invincibilityFrames: number; // Brief invincibility after hit
     passengers: Passenger[]; // 4 passengers with physics
     implosionFrame: number; // Frame counter for implosion animation (0 = not imploding)
+    rocketsRemaining: number; // Small rockets (1 HP damage)
+    minesRemaining: number; // Big mine (instant kill)
 }
 
 /**
@@ -109,6 +150,8 @@ export interface GameState {
     introProgress: number; // 0-1, progress through intro animation
     players: Record<PlayerId, PlayerVehicle>;
     obstacles: Obstacle[];
+    projectiles: Projectile[]; // Rockets and mines
+    pickups: HPPickup[]; // HP pickups
     gameOver: boolean;
     winner: PlayerId | 'draw' | null;
     /** Depth at which we've generated obstacles up to */

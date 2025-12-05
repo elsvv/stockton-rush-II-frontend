@@ -26,14 +26,14 @@ export class SoundEngine {
         try {
             this.audioContext = new AudioContext();
 
-            // Master gain
+            // Master gain - LOUDER
             this.masterGain = this.audioContext.createGain();
-            this.masterGain.gain.value = 0.3;
+            this.masterGain.gain.value = 0.7;
             this.masterGain.connect(this.audioContext.destination);
 
-            // Ambient gain
+            // Ambient gain - LOUDER
             this.ambientGain = this.audioContext.createGain();
-            this.ambientGain.gain.value = 0.15;
+            this.ambientGain.gain.value = 0.4;
             this.ambientGain.connect(this.masterGain);
 
             // Depth-responsive lowpass filter (deeper = more muffled)

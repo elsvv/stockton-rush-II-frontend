@@ -12,7 +12,10 @@ import type {
     EngineConfig,
     Obstacle,
     Passenger,
+    Projectile,
+    HPPickup,
 } from './types';
+import { ProjectileType } from './types';
 import { PlayerState, DeathCause, GamePhase } from './types';
 import { createRNG } from './rng';
 import { generateObstacles, updateObstacles, getVisibleObstacles } from './obstacleGenerator';
@@ -25,6 +28,7 @@ import {
     CAPSULE_HP,
     PASSENGER_COUNT,
     HORIZONTAL_SPEED,
+    VERTICAL_SPEED,
     BASE_DESCENT_SPEED,
     DESCENT_SPEED_FACTOR,
     ASCENT_SPEED,
@@ -40,6 +44,17 @@ import {
     getPlayer2StartX,
     PLAYER_START_Y,
     OBSTACLE_GENERATION_BUFFER,
+    SMALL_ROCKET_COUNT,
+    SMALL_ROCKET_DAMAGE,
+    MINE_DAMAGE,
+    ROCKET_SPEED,
+    MINE_LIFETIME,
+    ROCKET_WIDTH,
+    ROCKET_HEIGHT,
+    MINE_SIZE,
+    HP_PICKUP_CHANCE,
+    HP_PICKUP_SIZE,
+    HP_PICKUP_HEAL,
 } from './config';
 
 /** Create initial passengers for a submarine */
@@ -62,6 +77,7 @@ export function createInitialState(config: EngineConfig): GameState {
         x: startX,
         y: PLAYER_START_Y,
         velocityX: 0,
+        velocityY: 0,
         width: SUB_WIDTH,
         height: SUB_HEIGHT,
         hp: SUB_STARTING_HP,
@@ -71,19 +87,23 @@ export function createInitialState(config: EngineConfig): GameState {
         invincibilityFrames: 0,
         passengers: createPassengers(),
         implosionFrame: 0,
+        rocketsRemaining: SMALL_ROCKET_COUNT,
+        minesRemaining: 1,
     });
 
     return {
         frame: 0,
         seed: config.seed,
         rngState: rng.getState(),
-        phase: GamePhase.Playing, // Start directly in playing for now
-        introProgress: 1, // Intro complete
+        phase: GamePhase.Playing,
+        introProgress: 1,
         players: {
             player1: createPlayer(getPlayer1StartX()),
             player2: createPlayer(getPlayer2StartX()),
         },
         obstacles: [],
+        projectiles: [],
+        pickups: [],
         gameOver: false,
         winner: null,
         generatedDepth: 0,
@@ -228,9 +248,15 @@ function updatePlayer(
         Math.min(getWorldRightBound() - newPlayer.width, newPlayer.x)
     );
 
+    // Vertical player-controlled movement (up/down within screen)
+    let verticalMove = 0;
+    if (input.up) verticalMove -= VERTICAL_SPEED * dt;
+    if (input.down) verticalMove += VERTICAL_SPEED * dt;
+
     // Calculate acceleration for passenger physics
     const acceleration = (newPlayer.x - prevX) / dt / HORIZONTAL_SPEED;
     newPlayer.velocityX = (newPlayer.x - prevX) / dt;
+    newPlayer.velocityY = verticalMove / dt;
 
     // Update passenger physics
     if (newPlayer.state === PlayerState.Descending && newPlayer.passengers.length > 0) {
@@ -239,8 +265,10 @@ function updatePlayer(
 
     // Vertical movement based on state
     if (newPlayer.state === PlayerState.Descending) {
-        const speed = calculateDescentSpeed(newPlayer.y);
-        newPlayer.y += speed * dt;
+        // Base descent speed (automatic)
+        const baseSpeed = calculateDescentSpeed(newPlayer.y);
+        // Add player-controlled vertical movement
+        newPlayer.y += baseSpeed * dt + verticalMove;
 
         // Update max depth
         if (newPlayer.y > newPlayer.maxDepthReached) {
@@ -451,6 +479,8 @@ export function updateGameState(
         introProgress: state.introProgress,
         players: newPlayers,
         obstacles,
+        projectiles: state.projectiles, // TODO: Update projectiles
+        pickups: state.pickups, // TODO: Update pickups
         gameOver,
         winner,
         generatedDepth,

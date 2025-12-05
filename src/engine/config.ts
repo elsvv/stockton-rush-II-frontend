@@ -78,19 +78,41 @@ export const COLLISION_DAMAGE: Record<ObstacleType, number> = {
 };
 
 /** Frames of invincibility after being hit */
-export const INVINCIBILITY_FRAMES = 90; // 1.5 seconds (more forgiving)
+export const INVINCIBILITY_FRAMES = 120; // 2 seconds (more forgiving)
 
 /** Base obstacle spawn rate (obstacles per 100 depth units) - scales with depth */
-export const OBSTACLE_DENSITY_MIN = 1.5; // At surface
-export const OBSTACLE_DENSITY_MAX = 4.5; // At max depth
+export const OBSTACLE_DENSITY_MIN = 0.8; // At surface (very few)
+export const OBSTACLE_DENSITY_MAX = 3.0; // At max depth (still manageable)
+
+/** Minimum gap between obstacles for player passage */
+export const MIN_PASSAGE_WIDTH = 100; // Ensure players can always pass
 
 /** Calculate obstacle density based on depth (gradual difficulty) */
 export function getObstacleDensity(depth: number): number {
     const normalizedDepth = Math.min(depth / MAX_DEPTH, 1);
-    // Slow ramp up: starts easy, gets harder
-    const curve = Math.pow(normalizedDepth, 0.7);
+    // Very slow ramp up: starts very easy, gradually gets harder
+    const curve = Math.pow(normalizedDepth, 0.9);
     return OBSTACLE_DENSITY_MIN + curve * (OBSTACLE_DENSITY_MAX - OBSTACLE_DENSITY_MIN);
 }
+
+/** Rocket/weapon configuration */
+export const ROCKETS_PER_PLAYER = 3; // 2 small + 1 mine
+export const SMALL_ROCKET_COUNT = 2;
+export const SMALL_ROCKET_DAMAGE = 1; // 25% of 4 HP
+export const MINE_DAMAGE = 4; // 100% instant kill
+export const ROCKET_SPEED = 400; // pixels per second
+export const MINE_LIFETIME = 300; // frames (5 seconds)
+export const ROCKET_WIDTH = 20;
+export const ROCKET_HEIGHT = 8;
+export const MINE_SIZE = 25;
+
+/** HP Pickup configuration */
+export const HP_PICKUP_CHANCE = 0.002; // Per frame chance to spawn
+export const HP_PICKUP_SIZE = 20;
+export const HP_PICKUP_HEAL = 1;
+
+/** Vertical movement speed */
+export const VERTICAL_SPEED = 150; // pixels per second
 
 /** Depth zones for obstacle types (extended for more variety) */
 export const CORAL_MIN_DEPTH = 0;
