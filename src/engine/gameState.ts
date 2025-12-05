@@ -14,6 +14,7 @@ import type {
     Passenger,
     Projectile,
     Pickup,
+    AnglerFish,
 } from './types';
 import { ProjectileType, PickupType } from './types';
 import { PlayerState, DeathCause, GamePhase } from './types';
@@ -55,6 +56,14 @@ import {
     HP_PICKUP_CHANCE,
     HP_PICKUP_SIZE,
     HP_PICKUP_HEAL,
+    ANGLER_FISH_MIN_DEPTH,
+    ANGLER_FISH_SPAWN_CHANCE,
+    ANGLER_FISH_WIDTH,
+    ANGLER_FISH_HEIGHT,
+    ANGLER_FISH_AGGRO_RADIUS,
+    ANGLER_FISH_SPEED_MULTIPLIER,
+    ANGLER_FISH_DAMAGE,
+    ANGLER_FISH_MAX_COUNT,
 } from './config';
 
 /** Create initial passengers for a submarine */
@@ -76,6 +85,12 @@ function generateProjectileId(): string {
 let pickupIdCounter = 0;
 function generatePickupId(): string {
     return `pickup_${pickupIdCounter++}`;
+}
+
+/** Generate a unique angler fish ID */
+let anglerFishIdCounter = 0;
+function generateAnglerFishId(): string {
+    return `angler_${anglerFishIdCounter++}`;
 }
 
 /** Ammo pickup chance (even rarer than HP) */
@@ -350,6 +365,7 @@ export function createInitialState(config: EngineConfig): GameState {
         obstacles: [],
         projectiles: [],
         pickups: [],
+        anglerFish: [],
         gameOver: false,
         winner: null,
         generatedDepth: 0,
@@ -435,6 +451,136 @@ function killPassenger(passengers: Passenger[]): Passenger[] {
         }
     }
     return newPassengers;
+}
+
+/**
+ * Create a new angler fish at a random position.
+ */
+function createAnglerFish(
+    rngNext: () => number,
+    depth: number,
+    canvasWidth: number
+): AnglerFish {
+    const side = rngNext() > 0.5 ? 'left' : 'right';
+    const x = side === 'left' ? -ANGLER_FISH_WIDTH : canvasWidth + ANGLER_FISH_WIDTH;
+    const y = depth + (rngNext() - 0.5) * 200; // Some vertical offset
+    
+    return {
+        id: generateAnglerFishId(),
+        x,
+        y,
+        width: ANGLER_FISH_WIDTH,
+        height: ANGLER_FISH_HEIGHT,
+        velocityX: 0,
+        velocityY: 0,
+        targetPlayerId: null,
+        aggroRadius: ANGLER_FISH_AGGRO_RADIUS,
+        speed: HORIZONTAL_SPEED * ANGLER_FISH_SPEED_MULTIPLIER,
+        damage: ANGLER_FISH_DAMAGE,
+        active: true,
+    };
+}
+
+/**
+ * Update angler fish: check aggro, move towards target, check collisions.
+ */
+function updateAnglerFish(
+    fish: AnglerFish[],
+    players: Record<PlayerId, PlayerVehicle>,
+    obstacles: Obstacle[],
+    dt: number
+): { fish: AnglerFish[]; damagedPlayers: PlayerId[] } {
+    const damagedPlayers: PlayerId[] = [];
+    
+    const updatedFish = fish.map(f => {
+        if (!f.active) return f;
+        
+        let newFish = { ...f };
+        
+        // Check aggro if no target
+        if (!newFish.targetPlayerId) {
+            for (const playerId of ['player1', 'player2'] as const) {
+                const player = players[playerId];
+                if (player.state !== PlayerState.Descending) continue;
+                
+                const dx = player.x + player.width / 2 - (f.x + f.width / 2);
+                const dy = player.y + player.height / 2 - (f.y + f.height / 2);
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance < f.aggroRadius) {
+                    newFish.targetPlayerId = playerId;
+                    break;
+                }
+            }
+        }
+        
+        // Move towards target
+        if (newFish.targetPlayerId) {
+            const target = players[newFish.targetPlayerId];
+            if (target.state === PlayerState.Dead || target.state === PlayerState.Escaped) {
+                // Target is gone, stay idle
+                newFish.targetPlayerId = null;
+            } else {
+                const dx = target.x + target.width / 2 - (newFish.x + newFish.width / 2);
+                const dy = target.y + target.height / 2 - (newFish.y + newFish.height / 2);
+                const distance = Math.sqrt(dx * dx + dy * dy);
+                
+                if (distance > 0) {
+                    // Normalize and apply speed
+                    newFish.velocityX = (dx / distance) * newFish.speed;
+                    newFish.velocityY = (dy / distance) * newFish.speed;
+                }
+            }
+        }
+        
+        // Apply velocity
+        newFish.x += newFish.velocityX * dt;
+        newFish.y += newFish.velocityY * dt;
+        
+        // Check collision with obstacles
+        const fishBox: AABB = {
+            x: newFish.x,
+            y: newFish.y,
+            width: newFish.width,
+            height: newFish.height,
+        };
+        
+        for (const obs of obstacles) {
+            if (!obs.active) continue;
+            const obsBox: AABB = {
+                x: obs.x,
+                y: obs.y,
+                width: obs.width,
+                height: obs.height,
+            };
+            if (checkAABBCollision(fishBox, obsBox)) {
+                // Fish dies on obstacle collision
+                newFish.active = false;
+                break;
+            }
+        }
+        
+        // Check collision with target player
+        if (newFish.active && newFish.targetPlayerId) {
+            const target = players[newFish.targetPlayerId];
+            if (target.state === PlayerState.Descending) {
+                const playerBox: AABB = {
+                    x: target.x,
+                    y: target.y,
+                    width: target.width,
+                    height: target.height,
+                };
+                if (checkAABBCollision(fishBox, playerBox)) {
+                    damagedPlayers.push(newFish.targetPlayerId);
+                    newFish.active = false;
+                }
+            }
+        }
+        
+        return newFish;
+    });
+    
+    return { fish: updatedFish.filter(f => f.active), damagedPlayers };
 }
 
 /**
@@ -837,6 +983,37 @@ export function updateGameState(
     // Remove collected pickups
     pickups = pickups.filter((p) => p.active);
 
+    // Spawn angler fish at deep depths
+    let anglerFish = [...state.anglerFish];
+    if (maxActiveDepth > ANGLER_FISH_MIN_DEPTH && anglerFish.length < ANGLER_FISH_MAX_COUNT) {
+        // Chance to spawn based on depth
+        if (rng.next() < ANGLER_FISH_SPAWN_CHANCE * (maxActiveDepth - ANGLER_FISH_MIN_DEPTH)) {
+            const newFish = createAnglerFish(rng.next.bind(rng), maxActiveDepth, 1920);
+            anglerFish.push(newFish);
+        }
+    }
+
+    // Update angler fish (movement and collisions)
+    const fishResult = updateAnglerFish(anglerFish, newPlayers, obstacles, dt);
+    anglerFish = fishResult.fish;
+
+    // Apply damage from fish attacks
+    for (const playerId of fishResult.damagedPlayers) {
+        const player = newPlayers[playerId];
+        if (player.invincibilityFrames === 0 && player.state === PlayerState.Descending) {
+            const newHp = player.hp - ANGLER_FISH_DAMAGE;
+            newPlayers = {
+                ...newPlayers,
+                [playerId]: {
+                    ...player,
+                    hp: Math.max(0, newHp),
+                    invincibilityFrames: INVINCIBILITY_FRAMES,
+                    passengers: newHp < player.hp ? killPassenger(player.passengers) : player.passengers,
+                },
+            };
+        }
+    }
+
     // Update current max depth
     const newMaxDepth = Math.max(state.currentMaxDepth, newPlayers.player1.y, newPlayers.player2.y);
 
@@ -853,6 +1030,7 @@ export function updateGameState(
         obstacles,
         projectiles: newProjectiles,
         pickups,
+        anglerFish,
         gameOver,
         winner,
         generatedDepth,

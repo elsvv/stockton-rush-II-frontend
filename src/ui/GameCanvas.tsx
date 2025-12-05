@@ -13,6 +13,7 @@ import type {
     Passenger,
     Projectile,
     Pickup,
+    AnglerFish,
 } from '../engine/types';
 import { PlayerState, ObstacleType, ProjectileType, PickupType } from '../engine/types';
 import { COLORS, MAX_DEPTH, TITANIC_DEPTH, PASSENGER_COUNT } from '../engine/config';
@@ -214,8 +215,8 @@ function getCameraMode(players: Record<PlayerId, PlayerVehicle>): {
     const p2Ascending = p2.state === PlayerState.Ascending;
 
     // Split screen when both players are active AND at least one is ascending
-    // (meaning they are in different phases and need separate cameras)
-    if (p1Active && p2Active && (p1Ascending || p2Ascending) && !(p1Ascending && p2Ascending)) {
+    // This keeps split even when both players have ejected (both ascending)
+    if (p1Active && p2Active && (p1Ascending || p2Ascending)) {
         // Player 1 always on top, Player 2 always on bottom
         return {
             mode: 'split',
@@ -915,6 +916,122 @@ function drawFlashlight(
     ctx.restore();
 }
 
+/** Draw an angler fish (enemy with glowing lure) */
+function drawAnglerFish(
+    ctx: CanvasRenderingContext2D,
+    fish: AnglerFish,
+    cameraY: number,
+    canvasHeight: number,
+    frame: number
+) {
+    if (!fish.active) return;
+
+    const screenY = fish.y - cameraY + canvasHeight / 2;
+
+    // Skip if off-screen
+    if (screenY + fish.height < 0 || screenY > canvasHeight) return;
+
+    ctx.save();
+
+    const centerX = fish.x + fish.width / 2;
+    const centerY = screenY + fish.height / 2;
+
+    // Determine direction (facing towards velocity)
+    const facingRight = fish.velocityX >= 0;
+    const angle = Math.atan2(fish.velocityY, Math.abs(fish.velocityX)) * (facingRight ? 1 : -1);
+
+    ctx.translate(centerX, centerY);
+    ctx.rotate(angle);
+    if (!facingRight) ctx.scale(-1, 1);
+
+    // Body (dark with bioluminescent spots)
+    ctx.fillStyle = '#1a2f4a';
+    ctx.beginPath();
+    ctx.ellipse(0, 0, fish.width / 2, fish.height / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Dark outline
+    ctx.strokeStyle = '#0d1a2a';
+    ctx.lineWidth = 2;
+    ctx.stroke();
+
+    // Bioluminescent spots on body
+    const spotPositions = [
+        { x: -fish.width * 0.2, y: -fish.height * 0.2 },
+        { x: fish.width * 0.1, y: fish.height * 0.1 },
+        { x: -fish.width * 0.1, y: fish.height * 0.2 },
+    ];
+    for (const spot of spotPositions) {
+        const pulse = 0.5 + 0.5 * Math.sin(frame * 0.1 + spot.x);
+        ctx.fillStyle = `rgba(100, 200, 255, ${0.3 + pulse * 0.3})`;
+        ctx.beginPath();
+        ctx.arc(spot.x, spot.y, 2 + pulse, 0, Math.PI * 2);
+        ctx.fill();
+    }
+
+    // Lantern/lure (the glowing part)
+    const lureX = fish.width / 2 + 8;
+    const lureY = -fish.height / 3;
+
+    // Lure glow
+    const glowPulse = 0.7 + 0.3 * Math.sin(frame * 0.15);
+    const glowGradient = ctx.createRadialGradient(lureX, lureY, 0, lureX, lureY, 25 * glowPulse);
+    glowGradient.addColorStop(0, 'rgba(255, 255, 150, 0.9)');
+    glowGradient.addColorStop(0.3, 'rgba(255, 200, 100, 0.5)');
+    glowGradient.addColorStop(1, 'rgba(255, 150, 50, 0)');
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.arc(lureX, lureY, 25 * glowPulse, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Lure antenna
+    ctx.strokeStyle = '#3a4a5a';
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.moveTo(fish.width / 4, -fish.height / 4);
+    ctx.quadraticCurveTo(fish.width / 2, -fish.height / 2, lureX, lureY);
+    ctx.stroke();
+
+    // Lure bulb
+    ctx.fillStyle = `rgba(255, 255, 200, ${0.8 + 0.2 * glowPulse})`;
+    ctx.beginPath();
+    ctx.arc(lureX, lureY, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Eye (menacing red)
+    ctx.fillStyle = '#ff3030';
+    ctx.beginPath();
+    ctx.arc(fish.width / 4, -fish.height / 6, 4, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#000';
+    ctx.beginPath();
+    ctx.arc(fish.width / 4 + 1, -fish.height / 6, 2, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Teeth (small triangles)
+    ctx.fillStyle = '#ffffff';
+    const teethY = fish.height / 8;
+    for (let i = 0; i < 4; i++) {
+        const tx = fish.width / 4 + i * 4;
+        ctx.beginPath();
+        ctx.moveTo(tx, teethY);
+        ctx.lineTo(tx + 2, teethY + 4);
+        ctx.lineTo(tx + 4, teethY);
+        ctx.fill();
+    }
+
+    // Tail fin
+    ctx.fillStyle = '#1a2f4a';
+    ctx.beginPath();
+    ctx.moveTo(-fish.width / 2, 0);
+    ctx.lineTo(-fish.width / 2 - 10, -8);
+    ctx.lineTo(-fish.width / 2 - 10, 8);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+}
+
 /** Draw a player (submarine or capsule) based on their state */
 function drawPlayer(
     ctx: CanvasRenderingContext2D,
@@ -1039,6 +1156,11 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
                 drawPickup(ctx, pickup, focusDepth, height, gameState.frame);
             }
 
+            // Draw angler fish
+            for (const fish of gameState.anglerFish) {
+                drawAnglerFish(ctx, fish, focusDepth, height, gameState.frame);
+            }
+
             // Draw players
             drawPlayer(ctx, players.player1, 'player1', focusDepth, height);
             drawPlayer(ctx, players.player2, 'player2', focusDepth, height);
@@ -1085,6 +1207,9 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
                 }
                 for (const pickup of gameState.pickups) {
                     drawPickup(ctx, pickup, cameraY, height, gameState.frame);
+                }
+                for (const fish of gameState.anglerFish) {
+                    drawAnglerFish(ctx, fish, cameraY, height, gameState.frame);
                 }
                 drawPlayer(ctx, topPlayerData, cameraMode.topPlayer, cameraY, height);
 
@@ -1145,6 +1270,9 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
                 }
                 for (const pickup of gameState.pickups) {
                     drawPickup(ctx, pickup, cameraY, height, gameState.frame);
+                }
+                for (const fish of gameState.anglerFish) {
+                    drawAnglerFish(ctx, fish, cameraY, height, gameState.frame);
                 }
                 drawPlayer(ctx, bottomPlayerData, cameraMode.bottomPlayer, cameraY, height);
 

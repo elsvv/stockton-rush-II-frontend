@@ -25,7 +25,8 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
         width: window.innerWidth,
         height: window.innerHeight,
     });
-    const [audioInitialized, setAudioInitialized] = useState(false);
+    // Use global audio state from SoundEngine
+    const [audioInitialized, setAudioInitialized] = useState(soundEngine.isReady());
 
     // Ready state - both players must press DOWN to start
     const [player1Ready, setPlayer1Ready] = useState(false);
@@ -92,8 +93,11 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
 
     // Initialize audio on first interaction
     const initAudio = useCallback(async () => {
-        if (!audioInitialized) {
+        if (!soundEngine.isReady()) {
             await soundEngine.init();
+            setAudioInitialized(true);
+        } else if (!audioInitialized) {
+            // Already initialized from previous game, just update local state
             setAudioInitialized(true);
         }
     }, [audioInitialized]);

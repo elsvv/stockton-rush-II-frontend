@@ -132,6 +132,16 @@ export const OBSTACLE_SIZE = {
 /** Turtle movement speed */
 export const TURTLE_SPEED = 30;
 
+/** Angler Fish configuration */
+export const ANGLER_FISH_MIN_DEPTH = 2000; // Start appearing at 2000m
+export const ANGLER_FISH_SPAWN_CHANCE = 0.0005; // Spawn chance per frame per depth unit
+export const ANGLER_FISH_WIDTH = 35; // Slightly smaller than submarine
+export const ANGLER_FISH_HEIGHT = 25;
+export const ANGLER_FISH_AGGRO_RADIUS = 150; // ~10-15% of 1920px screen
+export const ANGLER_FISH_SPEED_MULTIPLIER = 0.75; // 25% slower than submarine base speed
+export const ANGLER_FISH_DAMAGE = 1; // 1 HP damage
+export const ANGLER_FISH_MAX_COUNT = 5; // Max fish on screen at once
+
 /** How far ahead to generate obstacles */
 export const OBSTACLE_GENERATION_BUFFER = 800;
 

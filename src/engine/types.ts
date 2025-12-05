@@ -101,6 +101,25 @@ export interface Pickup {
 }
 
 /**
+ * Angler fish enemy that chases players.
+ * Appears at deeper depths and deals damage on contact.
+ */
+export interface AnglerFish {
+    id: string;
+    x: number;
+    y: number;
+    width: number;
+    height: number;
+    velocityX: number;
+    velocityY: number;
+    targetPlayerId: PlayerId | null; // Who is being chased
+    aggroRadius: number; // Detection range
+    speed: number; // Movement speed
+    damage: number; // Damage dealt on hit
+    active: boolean;
+}
+
+/**
  * @deprecated Use Pickup instead
  */
 export interface HPPickup {
@@ -172,6 +191,7 @@ export interface GameState {
     obstacles: Obstacle[];
     projectiles: Projectile[]; // Rockets and mines
     pickups: Pickup[]; // Health and ammo pickups
+    anglerFish: AnglerFish[]; // Enemy fish
     gameOver: boolean;
     winner: PlayerId | 'draw' | null;
     /** Depth at which we've generated obstacles up to */
