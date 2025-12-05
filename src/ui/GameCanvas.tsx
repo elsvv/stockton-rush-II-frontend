@@ -12,8 +12,9 @@ import type {
     PlayerId,
     Passenger,
     Projectile,
+    Pickup,
 } from '../engine/types';
-import { PlayerState, ObstacleType, ProjectileType } from '../engine/types';
+import { PlayerState, ObstacleType, ProjectileType, PickupType } from '../engine/types';
 import { COLORS, MAX_DEPTH, TITANIC_DEPTH, PASSENGER_COUNT } from '../engine/config';
 
 interface GameCanvasProps {
@@ -772,6 +773,91 @@ function drawProjectile(
     ctx.restore();
 }
 
+/** Draw a pickup (health, ammo) */
+function drawPickup(
+    ctx: CanvasRenderingContext2D,
+    pickup: Pickup,
+    cameraY: number,
+    canvasHeight: number,
+    frame: number
+) {
+    if (!pickup.active) return;
+
+    const screenY = pickup.y - cameraY + canvasHeight / 2;
+
+    // Skip if off-screen
+    if (screenY + pickup.size < 0 || screenY > canvasHeight) return;
+
+    ctx.save();
+
+    // Floating animation
+    const floatOffset = Math.sin(frame * 0.1 + pickup.x) * 3;
+    const drawY = screenY + floatOffset;
+
+    // Glow effect
+    const glowSize = pickup.size * 1.5;
+    const glow = ctx.createRadialGradient(
+        pickup.x + pickup.size / 2,
+        drawY + pickup.size / 2,
+        0,
+        pickup.x + pickup.size / 2,
+        drawY + pickup.size / 2,
+        glowSize
+    );
+
+    if (pickup.type === PickupType.Health) {
+        // Health pickup - use sprite or draw heart
+        const sprite = loadSprite('/hpitem.png');
+
+        glow.addColorStop(0, 'rgba(255, 100, 100, 0.4)');
+        glow.addColorStop(1, 'rgba(255, 100, 100, 0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(pickup.x + pickup.size / 2, drawY + pickup.size / 2, glowSize, 0, Math.PI * 2);
+        ctx.fill();
+
+        if (sprite) {
+            ctx.drawImage(sprite, pickup.x, drawY, pickup.size, pickup.size);
+        } else {
+            // Fallback heart emoji
+            ctx.font = `${pickup.size}px Arial`;
+            ctx.textAlign = 'center';
+            ctx.textBaseline = 'middle';
+            ctx.fillText('❤️', pickup.x + pickup.size / 2, drawY + pickup.size / 2);
+        }
+    } else if (pickup.type === PickupType.Rocket) {
+        // Rocket ammo pickup
+        glow.addColorStop(0, 'rgba(255, 150, 50, 0.4)');
+        glow.addColorStop(1, 'rgba(255, 150, 50, 0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(pickup.x + pickup.size / 2, drawY + pickup.size / 2, glowSize, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw rocket emoji
+        ctx.font = `${pickup.size * 0.8}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('🚀', pickup.x + pickup.size / 2, drawY + pickup.size / 2);
+    } else if (pickup.type === PickupType.Mine) {
+        // Mine ammo pickup
+        glow.addColorStop(0, 'rgba(255, 50, 50, 0.4)');
+        glow.addColorStop(1, 'rgba(255, 50, 50, 0)');
+        ctx.fillStyle = glow;
+        ctx.beginPath();
+        ctx.arc(pickup.x + pickup.size / 2, drawY + pickup.size / 2, glowSize, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw mine/bomb emoji
+        ctx.font = `${pickup.size * 0.8}px Arial`;
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('💣', pickup.x + pickup.size / 2, drawY + pickup.size / 2);
+    }
+
+    ctx.restore();
+}
+
 /** Draw submarine flashlight cone */
 function drawFlashlight(
     ctx: CanvasRenderingContext2D,
@@ -946,6 +1032,11 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
                 drawProjectile(ctx, projectile, focusDepth, height, gameState.frame);
             }
 
+            // Draw pickups
+            for (const pickup of gameState.pickups) {
+                drawPickup(ctx, pickup, focusDepth, height, gameState.frame);
+            }
+
             // Draw players
             drawPlayer(ctx, players.player1, 'player1', focusDepth, height);
             drawPlayer(ctx, players.player2, 'player2', focusDepth, height);
@@ -988,6 +1079,9 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
                 }
                 for (const projectile of gameState.projectiles) {
                     drawProjectile(ctx, projectile, cameraY, height, gameState.frame);
+                }
+                for (const pickup of gameState.pickups) {
+                    drawPickup(ctx, pickup, cameraY, height, gameState.frame);
                 }
                 drawPlayer(ctx, ascPlayer, cameraMode.ascendingPlayer, cameraY, height);
 
@@ -1044,6 +1138,9 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
                 }
                 for (const projectile of gameState.projectiles) {
                     drawProjectile(ctx, projectile, cameraY, height, gameState.frame);
+                }
+                for (const pickup of gameState.pickups) {
+                    drawPickup(ctx, pickup, cameraY, height, gameState.frame);
                 }
                 drawPlayer(ctx, descPlayer, cameraMode.descendingPlayer, cameraY, height);
 

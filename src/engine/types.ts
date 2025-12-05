@@ -80,8 +80,28 @@ export interface Projectile {
     active: boolean;
 }
 
+/** Pickup types */
+export const PickupType = {
+    Health: 'health',
+    Rocket: 'rocket',
+    Mine: 'mine',
+} as const;
+export type PickupType = (typeof PickupType)[keyof typeof PickupType];
+
 /**
- * HP Pickup in the game world.
+ * Pickup in the game world (HP, ammo, etc).
+ */
+export interface Pickup {
+    id: string;
+    type: PickupType;
+    x: number;
+    y: number;
+    size: number;
+    active: boolean;
+}
+
+/**
+ * @deprecated Use Pickup instead
  */
 export interface HPPickup {
     id: string;
@@ -151,7 +171,7 @@ export interface GameState {
     players: Record<PlayerId, PlayerVehicle>;
     obstacles: Obstacle[];
     projectiles: Projectile[]; // Rockets and mines
-    pickups: HPPickup[]; // HP pickups
+    pickups: Pickup[]; // Health and ammo pickups
     gameOver: boolean;
     winner: PlayerId | 'draw' | null;
     /** Depth at which we've generated obstacles up to */

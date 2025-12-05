@@ -13,9 +13,9 @@ import type {
     Obstacle,
     Passenger,
     Projectile,
-    HPPickup,
+    Pickup,
 } from './types';
-import { ProjectileType } from './types';
+import { ProjectileType, PickupType } from './types';
 import { PlayerState, DeathCause, GamePhase } from './types';
 import { createRNG } from './rng';
 import { generateObstacles, updateObstacles, getVisibleObstacles } from './obstacleGenerator';
@@ -70,6 +70,72 @@ function createPassengers(): Passenger[] {
 let projectileIdCounter = 0;
 function generateProjectileId(): string {
     return `proj_${projectileIdCounter++}`;
+}
+
+/** Generate a unique pickup ID */
+let pickupIdCounter = 0;
+function generatePickupId(): string {
+    return `pickup_${pickupIdCounter++}`;
+}
+
+/** Ammo pickup chance (lower than HP) */
+const AMMO_PICKUP_CHANCE = 0.003; // Per frame per depth segment
+
+/** Create a pickup at a given position */
+function createPickup(type: PickupType, x: number, y: number): Pickup {
+    return {
+        id: generatePickupId(),
+        type,
+        x,
+        y,
+        size: HP_PICKUP_SIZE,
+        active: true,
+    };
+}
+
+/** Check if pickup was collected by a player */
+function checkPickupCollision(pickup: Pickup, player: PlayerVehicle): boolean {
+    if (!pickup.active) return false;
+    if (player.state !== PlayerState.Descending) return false;
+
+    const playerBox: AABB = {
+        x: player.x,
+        y: player.y,
+        width: player.width,
+        height: player.height,
+    };
+
+    const pickupBox: AABB = {
+        x: pickup.x,
+        y: pickup.y,
+        width: pickup.size,
+        height: pickup.size,
+    };
+
+    return checkAABBCollision(playerBox, pickupBox);
+}
+
+/** Apply pickup effect to player */
+function applyPickup(pickup: Pickup, player: PlayerVehicle): PlayerVehicle {
+    switch (pickup.type) {
+        case PickupType.Health:
+            return {
+                ...player,
+                hp: Math.min(player.hp + HP_PICKUP_HEAL, SUB_STARTING_HP),
+            };
+        case PickupType.Rocket:
+            return {
+                ...player,
+                rocketsRemaining: player.rocketsRemaining + 1,
+            };
+        case PickupType.Mine:
+            return {
+                ...player,
+                minesRemaining: player.minesRemaining + 1,
+            };
+        default:
+            return player;
+    }
 }
 
 /** Create a rocket projectile */
@@ -618,9 +684,31 @@ export function updateGameState(
     const targetDepth = maxActiveDepth + OBSTACLE_GENERATION_BUFFER;
     let obstacles = state.obstacles;
     let generatedDepth = state.generatedDepth;
+    let pickups = [...state.pickups];
 
     if (targetDepth > generatedDepth) {
         obstacles = generateObstacles(rng, obstacles, generatedDepth, targetDepth);
+
+        // Generate pickups in the new depth range
+        const segmentSize = 100; // Check every 100m
+
+        for (let depth = generatedDepth; depth < targetDepth; depth += segmentSize) {
+            // HP pickup
+            if (rng.next() < HP_PICKUP_CHANCE * segmentSize) {
+                const x = rng.nextFloat(WORLD_LEFT_BOUND + 50, getWorldRightBound() - 50);
+                pickups.push(
+                    createPickup(PickupType.Health, x, depth + rng.nextFloat(0, segmentSize))
+                );
+            }
+
+            // Ammo pickup (rarer)
+            if (rng.next() < AMMO_PICKUP_CHANCE * segmentSize) {
+                const x = rng.nextFloat(WORLD_LEFT_BOUND + 50, getWorldRightBound() - 50);
+                const ammoType = rng.next() < 0.6 ? PickupType.Rocket : PickupType.Mine;
+                pickups.push(createPickup(ammoType, x, depth + rng.nextFloat(0, segmentSize)));
+            }
+        }
+
         generatedDepth = targetDepth;
     }
 
@@ -724,6 +812,31 @@ export function updateGameState(
     newPlayers = collisionResult.players;
     obstacles = collisionResult.obstacles;
 
+    // Check pickup collisions
+    for (const pickup of pickups) {
+        if (!pickup.active) continue;
+
+        // Check player 1
+        if (checkPickupCollision(pickup, newPlayers.player1)) {
+            newPlayers = {
+                ...newPlayers,
+                player1: applyPickup(pickup, newPlayers.player1),
+            };
+            pickup.active = false;
+        }
+        // Check player 2
+        else if (checkPickupCollision(pickup, newPlayers.player2)) {
+            newPlayers = {
+                ...newPlayers,
+                player2: applyPickup(pickup, newPlayers.player2),
+            };
+            pickup.active = false;
+        }
+    }
+
+    // Remove collected pickups
+    pickups = pickups.filter((p) => p.active);
+
     // Update current max depth
     const newMaxDepth = Math.max(state.currentMaxDepth, newPlayers.player1.y, newPlayers.player2.y);
 
@@ -739,7 +852,7 @@ export function updateGameState(
         players: newPlayers,
         obstacles,
         projectiles: newProjectiles,
-        pickups: state.pickups,
+        pickups,
         gameOver,
         winner,
         generatedDepth,
