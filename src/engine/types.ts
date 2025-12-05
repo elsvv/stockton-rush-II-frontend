@@ -8,12 +8,21 @@ export type PlayerId = 'player1' | 'player2';
 
 /** Current state of a player in the game */
 export const PlayerState = {
+    Intro: 'intro', // On the cargo ship, boarding
     Descending: 'descending',
     Ascending: 'ascending',
     Dead: 'dead',
     Escaped: 'escaped',
 } as const;
 export type PlayerState = (typeof PlayerState)[keyof typeof PlayerState];
+
+/** Game phase */
+export const GamePhase = {
+    Intro: 'intro', // Cargo ship scene, submarines deploying
+    Playing: 'playing', // Main gameplay
+    GameOver: 'gameover', // Both players done
+} as const;
+export type GamePhase = (typeof GamePhase)[keyof typeof GamePhase];
 
 /** Types of obstacles in the game */
 export const ObstacleType = {
@@ -61,11 +70,21 @@ export interface Obstacle {
 }
 
 /**
+ * Passenger in a submarine, with physics for visual sway.
+ */
+export interface Passenger {
+    alive: boolean;
+    offsetX: number; // Horizontal offset from center (for sway physics)
+    velocityX: number; // Velocity for physics simulation
+}
+
+/**
  * State of a single player's vehicle (submarine or capsule).
  */
 export interface PlayerVehicle {
     x: number; // Horizontal position
     y: number; // Depth (positive = deeper)
+    velocityX: number; // For physics calculations
     width: number;
     height: number;
     hp: number;
@@ -74,6 +93,8 @@ export interface PlayerVehicle {
     maxDepthReached: number;
     deathCause?: DeathCause;
     invincibilityFrames: number; // Brief invincibility after hit
+    passengers: Passenger[]; // 4 passengers with physics
+    implosionFrame: number; // Frame counter for implosion animation (0 = not imploding)
 }
 
 /**
@@ -84,6 +105,8 @@ export interface GameState {
     frame: number;
     seed: number;
     rngState: number; // Current state of the RNG
+    phase: GamePhase; // Current game phase
+    introProgress: number; // 0-1, progress through intro animation
     players: Record<PlayerId, PlayerVehicle>;
     obstacles: Obstacle[];
     gameOver: boolean;

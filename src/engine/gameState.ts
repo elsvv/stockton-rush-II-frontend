@@ -11,8 +11,9 @@ import type {
     AABB,
     EngineConfig,
     Obstacle,
+    Passenger,
 } from './types';
-import { PlayerState, DeathCause } from './types';
+import { PlayerState, DeathCause, GamePhase } from './types';
 import { createRNG } from './rng';
 import { generateObstacles, updateObstacles, getVisibleObstacles } from './obstacleGenerator';
 import {
@@ -22,6 +23,7 @@ import {
     CAPSULE_HEIGHT,
     SUB_STARTING_HP,
     CAPSULE_HP,
+    PASSENGER_COUNT,
     HORIZONTAL_SPEED,
     BASE_DESCENT_SPEED,
     DESCENT_SPEED_FACTOR,
@@ -40,6 +42,15 @@ import {
     OBSTACLE_GENERATION_BUFFER,
 } from './config';
 
+/** Create initial passengers for a submarine */
+function createPassengers(): Passenger[] {
+    return Array.from({ length: PASSENGER_COUNT }, () => ({
+        alive: true,
+        offsetX: 0,
+        velocityX: 0,
+    }));
+}
+
 /**
  * Create the initial game state from configuration.
  * This is the starting point for any game session.
@@ -50,6 +61,7 @@ export function createInitialState(config: EngineConfig): GameState {
     const createPlayer = (startX: number): PlayerVehicle => ({
         x: startX,
         y: PLAYER_START_Y,
+        velocityX: 0,
         width: SUB_WIDTH,
         height: SUB_HEIGHT,
         hp: SUB_STARTING_HP,
@@ -57,12 +69,16 @@ export function createInitialState(config: EngineConfig): GameState {
         state: PlayerState.Descending,
         maxDepthReached: PLAYER_START_Y,
         invincibilityFrames: 0,
+        passengers: createPassengers(),
+        implosionFrame: 0,
     });
 
     return {
         frame: 0,
         seed: config.seed,
         rngState: rng.getState(),
+        phase: GamePhase.Playing, // Start directly in playing for now
+        introProgress: 1, // Intro complete
         players: {
             player1: createPlayer(getPlayer1StartX()),
             player2: createPlayer(getPlayer2StartX()),
@@ -100,6 +116,61 @@ function calculateWearRate(depth: number): number {
     return BASE_WEAR_RATE + normalizedDepth * DEPTH_WEAR_FACTOR;
 }
 
+/** Physics constants for passenger sway */
+const PASSENGER_SWAY_DAMPING = 0.92;
+const PASSENGER_SWAY_SPRING = 8;
+const PASSENGER_SWAY_ACCELERATION = 15;
+const MAX_PASSENGER_OFFSET = 8;
+
+/**
+ * Update passenger physics (sway when turning).
+ */
+function updatePassengerPhysics(
+    passengers: Passenger[],
+    acceleration: number,
+    dt: number
+): Passenger[] {
+    return passengers.map((p) => {
+        if (!p.alive) return p;
+
+        // Apply acceleration force (opposite direction of sub movement)
+        let newVelocityX = p.velocityX - acceleration * PASSENGER_SWAY_ACCELERATION * dt;
+
+        // Apply spring force back to center
+        newVelocityX -= p.offsetX * PASSENGER_SWAY_SPRING * dt;
+
+        // Apply damping
+        newVelocityX *= PASSENGER_SWAY_DAMPING;
+
+        // Update position
+        let newOffsetX = p.offsetX + newVelocityX * dt * 60;
+
+        // Clamp offset
+        newOffsetX = Math.max(-MAX_PASSENGER_OFFSET, Math.min(MAX_PASSENGER_OFFSET, newOffsetX));
+
+        return {
+            ...p,
+            offsetX: newOffsetX,
+            velocityX: newVelocityX,
+        };
+    });
+}
+
+/**
+ * Kill a passenger (called when HP decreases).
+ */
+function killPassenger(passengers: Passenger[]): Passenger[] {
+    const newPassengers = [...passengers];
+    // Find the last alive passenger and kill them
+    for (let i = newPassengers.length - 1; i >= 0; i--) {
+        if (newPassengers[i].alive) {
+            newPassengers[i] = { ...newPassengers[i], alive: false };
+            break;
+        }
+    }
+    return newPassengers;
+}
+
 /**
  * Update a single player's state for one frame.
  */
@@ -109,13 +180,21 @@ function updatePlayer(
     obstacles: Obstacle[],
     dt: number
 ): { player: PlayerVehicle; collidedObstacles: string[] } {
-    // Dead or escaped players don't update
+    // Dead or escaped players don't update (but continue implosion animation)
     if (player.state === PlayerState.Dead || player.state === PlayerState.Escaped) {
+        // Continue implosion animation
+        if (player.implosionFrame > 0 && player.implosionFrame < 60) {
+            return {
+                player: { ...player, implosionFrame: player.implosionFrame + 1 },
+                collidedObstacles: [],
+            };
+        }
         return { player, collidedObstacles: [] };
     }
 
     let newPlayer = { ...player };
     const collidedObstacles: string[] = [];
+    const prevX = player.x;
 
     // Decrease invincibility frames
     if (newPlayer.invincibilityFrames > 0) {
@@ -130,8 +209,9 @@ function updatePlayer(
             width: CAPSULE_WIDTH,
             height: CAPSULE_HEIGHT,
             hp: CAPSULE_HP,
-            wear: 0, // Wear doesn't matter for capsule
-            invincibilityFrames: INVINCIBILITY_FRAMES, // Brief invincibility on transition
+            wear: 0,
+            invincibilityFrames: INVINCIBILITY_FRAMES,
+            passengers: [], // Capsule has no visible passengers
         };
     }
 
@@ -147,6 +227,15 @@ function updatePlayer(
         WORLD_LEFT_BOUND,
         Math.min(getWorldRightBound() - newPlayer.width, newPlayer.x)
     );
+
+    // Calculate acceleration for passenger physics
+    const acceleration = (newPlayer.x - prevX) / dt / HORIZONTAL_SPEED;
+    newPlayer.velocityX = (newPlayer.x - prevX) / dt;
+
+    // Update passenger physics
+    if (newPlayer.state === PlayerState.Descending && newPlayer.passengers.length > 0) {
+        newPlayer.passengers = updatePassengerPhysics(newPlayer.passengers, acceleration, dt);
+    }
 
     // Vertical movement based on state
     if (newPlayer.state === PlayerState.Descending) {
@@ -167,6 +256,9 @@ function updatePlayer(
             newPlayer.wear = 100;
             newPlayer.state = PlayerState.Dead;
             newPlayer.deathCause = DeathCause.Imploded;
+            newPlayer.implosionFrame = 1; // Start implosion animation
+            // Kill all passengers
+            newPlayer.passengers = newPlayer.passengers.map((p) => ({ ...p, alive: false }));
             return { player: newPlayer, collidedObstacles };
         }
     } else if (newPlayer.state === PlayerState.Ascending) {
@@ -208,21 +300,34 @@ function updatePlayer(
                     newPlayer.hp = 0;
                     newPlayer.state = PlayerState.Dead;
                     newPlayer.deathCause = DeathCause.CrashedAscent;
+                    newPlayer.implosionFrame = 1;
                     return { player: newPlayer, collidedObstacles };
                 } else {
                     // Descent collision - apply damage and wear
                     const damage = COLLISION_DAMAGE[obstacle.type];
                     const wear = COLLISION_WEAR[obstacle.type];
 
+                    const prevHp = newPlayer.hp;
                     newPlayer.hp -= damage;
                     newPlayer.wear += wear;
                     newPlayer.invincibilityFrames = INVINCIBILITY_FRAMES;
+
+                    // Kill passengers for each HP lost
+                    for (let i = 0; i < prevHp - newPlayer.hp; i++) {
+                        newPlayer.passengers = killPassenger(newPlayer.passengers);
+                    }
 
                     // Check for death
                     if (newPlayer.hp <= 0 || newPlayer.wear >= 100) {
                         newPlayer.wear = Math.min(newPlayer.wear, 100);
                         newPlayer.state = PlayerState.Dead;
                         newPlayer.deathCause = DeathCause.Imploded;
+                        newPlayer.implosionFrame = 1; // Start implosion animation
+                        // Kill all remaining passengers
+                        newPlayer.passengers = newPlayer.passengers.map((p) => ({
+                            ...p,
+                            alive: false,
+                        }));
                         return { player: newPlayer, collidedObstacles };
                     }
                 }
@@ -342,6 +447,8 @@ export function updateGameState(
         frame: state.frame + 1,
         seed: state.seed,
         rngState: rng.getState(),
+        phase: gameOver ? GamePhase.GameOver : state.phase,
+        introProgress: state.introProgress,
         players: newPlayers,
         obstacles,
         gameOver,

@@ -28,16 +28,19 @@ export const MAX_DEPTH = 10000;
 /** Titanic wreck starts appearing at this depth */
 export const TITANIC_DEPTH = MAX_DEPTH - 500;
 
-/** Player submarine dimensions */
-export const SUB_WIDTH = 40;
-export const SUB_HEIGHT = 25;
+/** Player submarine dimensions (larger for detailed view with portholes) */
+export const SUB_WIDTH = 80;
+export const SUB_HEIGHT = 40;
 
 /** Escape capsule dimensions (smaller than sub) */
 export const CAPSULE_WIDTH = 25;
 export const CAPSULE_HEIGHT = 20;
 
-/** Starting HP for submarines */
-export const SUB_STARTING_HP = 3;
+/** Starting HP for submarines (one per passenger) */
+export const SUB_STARTING_HP = 4;
+
+/** Number of passengers in submarine */
+export const PASSENGER_COUNT = 4;
 
 /** Capsule HP (any hit = death) */
 export const CAPSULE_HP = 1;

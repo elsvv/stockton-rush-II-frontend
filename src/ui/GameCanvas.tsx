@@ -5,9 +5,9 @@
  */
 
 import { useRef, useEffect, useCallback } from 'react';
-import type { GameState, PlayerVehicle, Obstacle, PlayerId } from '../engine/types';
+import type { GameState, PlayerVehicle, Obstacle, PlayerId, Passenger } from '../engine/types';
 import { PlayerState, ObstacleType } from '../engine/types';
-import { COLORS, MAX_DEPTH, TITANIC_DEPTH } from '../engine/config';
+import { COLORS, MAX_DEPTH, TITANIC_DEPTH, PASSENGER_COUNT } from '../engine/config';
 
 interface GameCanvasProps {
     gameState: GameState;
@@ -69,43 +69,254 @@ function getCameraMode(players: Record<PlayerId, PlayerVehicle>): {
     };
 }
 
-/** Draw a submarine */
+/** Draw a cargo ship at the surface */
+function drawCargoShip(
+    ctx: CanvasRenderingContext2D,
+    centerX: number,
+    cameraY: number,
+    canvasHeight: number
+) {
+    const surfaceY = 0 - cameraY + canvasHeight / 2;
+
+    // Only draw if visible
+    if (surfaceY < -200 || surfaceY > canvasHeight + 100) return;
+
+    ctx.save();
+
+    // Ship hull (dark gray)
+    ctx.fillStyle = '#2A2A2A';
+    ctx.beginPath();
+    ctx.moveTo(centerX - 120, surfaceY - 20);
+    ctx.lineTo(centerX + 120, surfaceY - 20);
+    ctx.lineTo(centerX + 100, surfaceY + 30);
+    ctx.lineTo(centerX - 100, surfaceY + 30);
+    ctx.closePath();
+    ctx.fill();
+
+    // Ship deck
+    ctx.fillStyle = '#4A4A4A';
+    ctx.fillRect(centerX - 110, surfaceY - 40, 220, 20);
+
+    // Bridge
+    ctx.fillStyle = '#3A3A3A';
+    ctx.fillRect(centerX - 30, surfaceY - 70, 60, 30);
+
+    // Windows on bridge
+    ctx.fillStyle = '#88CCFF';
+    ctx.fillRect(centerX - 20, surfaceY - 60, 10, 10);
+    ctx.fillRect(centerX + 10, surfaceY - 60, 10, 10);
+
+    // Crane
+    ctx.strokeStyle = '#555';
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(centerX + 60, surfaceY - 40);
+    ctx.lineTo(centerX + 60, surfaceY - 90);
+    ctx.lineTo(centerX + 100, surfaceY - 70);
+    ctx.stroke();
+
+    // Surface water line
+    ctx.fillStyle = 'rgba(135, 206, 235, 0.5)';
+    ctx.fillRect(0, surfaceY, ctx.canvas.width, 10);
+
+    ctx.restore();
+}
+
+/** Draw a passenger inside a porthole */
+function drawPassenger(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    passenger: Passenger,
+    color: string
+) {
+    if (!passenger.alive) return;
+
+    const offsetX = passenger.offsetX;
+
+    ctx.save();
+
+    // Head
+    ctx.fillStyle = '#FFD5B4'; // Skin tone
+    ctx.beginPath();
+    ctx.arc(x + offsetX, y - 2, 4, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Body
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(x + offsetX, y + 5, 3, 5, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+}
+
+/** Draw a submarine with portholes and passengers */
 function drawSubmarine(
     ctx: CanvasRenderingContext2D,
     player: PlayerVehicle,
     color: string,
     cameraY: number,
-    canvasHeight: number
+    canvasHeight: number,
+    isPlayer1: boolean
 ) {
     const screenY = player.y - cameraY + canvasHeight / 2;
+    const centerX = player.x + player.width / 2;
+    const centerY = screenY + player.height / 2;
 
     ctx.save();
-    ctx.fillStyle = color;
 
-    // Main body (ellipse)
+    // Check for implosion
+    if (player.implosionFrame > 0) {
+        drawImplosion(ctx, player, centerX, centerY, color);
+        ctx.restore();
+        return;
+    }
+
+    // Main body (elongated ellipse - submarine shape)
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(centerX, centerY, player.width / 2, player.height / 2, 0, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Darker bottom half for depth
+    ctx.fillStyle = 'rgba(0, 0, 0, 0.2)';
+    ctx.beginPath();
+    ctx.ellipse(centerX, centerY + 3, player.width / 2 - 2, player.height / 2 - 2, 0, 0, Math.PI);
+    ctx.fill();
+
+    // Conning tower (top fin)
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.ellipse(centerX, centerY - player.height / 2 + 2, 10, 8, 0, Math.PI, 0);
+    ctx.fill();
+
+    // Propeller at back
+    ctx.fillStyle = '#444';
+    const propX = player.x - 8;
+    ctx.beginPath();
+    ctx.ellipse(propX, centerY, 5, 10, 0, 0, Math.PI * 2);
+    ctx.fill();
+    // Propeller blades
+    ctx.strokeStyle = '#333';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(propX, centerY - 12);
+    ctx.lineTo(propX, centerY + 12);
+    ctx.stroke();
+
+    // Draw portholes with passengers
+    const portholeSpacing = player.width / (PASSENGER_COUNT + 1);
+    const portholeY = centerY;
+
+    for (let i = 0; i < PASSENGER_COUNT; i++) {
+        const portholeX = player.x + portholeSpacing * (i + 1);
+
+        // Porthole frame (darker)
+        ctx.fillStyle = '#333';
+        ctx.beginPath();
+        ctx.arc(portholeX, portholeY, 8, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Porthole glass (blue tint)
+        ctx.fillStyle = player.passengers[i]?.alive ? '#4488AA' : '#223344';
+        ctx.beginPath();
+        ctx.arc(portholeX, portholeY, 6, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Draw passenger if alive
+        if (player.passengers[i]) {
+            drawPassenger(
+                ctx,
+                portholeX,
+                portholeY,
+                player.passengers[i],
+                isPlayer1 ? '#FF6600' : '#00CC66'
+            );
+        }
+    }
+
+    // Front viewport (larger)
+    ctx.fillStyle = '#333';
+    ctx.beginPath();
+    ctx.arc(player.x + player.width - 12, centerY, 10, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = '#6699BB';
+    ctx.beginPath();
+    ctx.arc(player.x + player.width - 12, centerY, 7, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Light beam from front
+    ctx.fillStyle = 'rgba(255, 255, 200, 0.1)';
+    ctx.beginPath();
+    ctx.moveTo(player.x + player.width - 5, centerY - 5);
+    ctx.lineTo(player.x + player.width + 50, centerY - 30);
+    ctx.lineTo(player.x + player.width + 50, centerY + 30);
+    ctx.lineTo(player.x + player.width - 5, centerY + 5);
+    ctx.closePath();
+    ctx.fill();
+
+    ctx.restore();
+}
+
+/** Draw implosion animation */
+function drawImplosion(
+    ctx: CanvasRenderingContext2D,
+    player: PlayerVehicle,
+    centerX: number,
+    centerY: number,
+    color: string
+) {
+    const progress = Math.min(player.implosionFrame / 30, 1);
+    const crushAmount = progress * 0.7;
+
+    // Crushed submarine
+    ctx.fillStyle = color;
     ctx.beginPath();
     ctx.ellipse(
-        player.x + player.width / 2,
-        screenY + player.height / 2,
-        player.width / 2,
-        player.height / 2,
+        centerX,
+        centerY,
+        (player.width / 2) * (1 - crushAmount),
+        (player.height / 2) * (1 + crushAmount * 0.5),
         0,
         0,
         Math.PI * 2
     );
     ctx.fill();
 
-    // Viewport (small circle)
-    ctx.fillStyle = '#333';
-    ctx.beginPath();
-    ctx.arc(player.x + player.width * 0.7, screenY + player.height / 2, 5, 0, Math.PI * 2);
-    ctx.fill();
+    // Blood/debris cloud
+    if (progress > 0.2) {
+        const cloudProgress = (progress - 0.2) / 0.8;
+        const cloudRadius = 30 + cloudProgress * 50;
 
-    // Propeller
-    ctx.fillStyle = '#666';
-    ctx.fillRect(player.x - 5, screenY + player.height / 2 - 3, 8, 6);
+        // Red blood cloud
+        const gradient = ctx.createRadialGradient(
+            centerX,
+            centerY,
+            0,
+            centerX,
+            centerY,
+            cloudRadius
+        );
+        gradient.addColorStop(0, `rgba(139, 0, 0, ${0.8 * (1 - cloudProgress)})`);
+        gradient.addColorStop(0.5, `rgba(180, 20, 20, ${0.5 * (1 - cloudProgress)})`);
+        gradient.addColorStop(1, 'rgba(100, 0, 0, 0)');
 
-    ctx.restore();
+        ctx.fillStyle = gradient;
+        ctx.beginPath();
+        ctx.arc(centerX, centerY, cloudRadius, 0, Math.PI * 2);
+        ctx.fill();
+
+        // Debris particles
+        ctx.fillStyle = '#333';
+        for (let i = 0; i < 8; i++) {
+            const angle = (i / 8) * Math.PI * 2 + progress * 2;
+            const dist = cloudProgress * 40;
+            const px = centerX + Math.cos(angle) * dist;
+            const py = centerY + Math.sin(angle) * dist;
+            ctx.fillRect(px - 2, py - 2, 4, 4);
+        }
+    }
 }
 
 /** Draw an escape capsule */
@@ -285,28 +496,43 @@ function drawPlayer(
     cameraY: number,
     canvasHeight: number
 ) {
+    const isPlayer1 = playerId === 'player1';
+    const color = isPlayer1 ? COLORS.sub1 : COLORS.sub2;
+
+    // Draw implosion animation for dead players
+    if (player.state === PlayerState.Dead && player.implosionFrame > 0) {
+        drawSubmarine(ctx, player, color, cameraY, canvasHeight, isPlayer1);
+        return;
+    }
+
     if (player.state === PlayerState.Dead || player.state === PlayerState.Escaped) {
         return;
     }
 
-    const isPlayer1 = playerId === 'player1';
-
     if (player.state === PlayerState.Descending) {
-        const color = isPlayer1 ? COLORS.sub1 : COLORS.sub2;
-        drawSubmarine(ctx, player, color, cameraY, canvasHeight);
+        drawSubmarine(ctx, player, color, cameraY, canvasHeight, isPlayer1);
     } else if (player.state === PlayerState.Ascending) {
-        const color = isPlayer1 ? COLORS.capsule1 : COLORS.capsule2;
-        drawCapsule(ctx, player, color, cameraY, canvasHeight);
+        const capsuleColor = isPlayer1 ? COLORS.capsule1 : COLORS.capsule2;
+        drawCapsule(ctx, player, capsuleColor, cameraY, canvasHeight);
     }
 
     // Invincibility flash effect
     if (player.invincibilityFrames > 0 && player.invincibilityFrames % 10 < 5) {
-        // Draw a white overlay for flashing effect
         const screenY = player.y - cameraY + canvasHeight / 2;
         ctx.save();
-        ctx.globalAlpha = 0.5;
+        ctx.globalAlpha = 0.4;
         ctx.fillStyle = '#FFFFFF';
-        ctx.fillRect(player.x, screenY, player.width, player.height);
+        ctx.beginPath();
+        ctx.ellipse(
+            player.x + player.width / 2,
+            screenY + player.height / 2,
+            player.width / 2 + 5,
+            player.height / 2 + 5,
+            0,
+            0,
+            Math.PI * 2
+        );
+        ctx.fill();
         ctx.restore();
     }
 }
@@ -354,6 +580,9 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
             // Draw background with water color
             ctx.fillStyle = getWaterColor(focusDepth);
             ctx.fillRect(0, 0, width, height);
+
+            // Draw cargo ship at surface
+            drawCargoShip(ctx, width / 2, focusDepth, height);
 
             // Draw Titanic
             drawTitanic(ctx, focusDepth, width, height);
