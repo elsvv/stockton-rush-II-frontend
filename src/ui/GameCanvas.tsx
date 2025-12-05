@@ -22,6 +22,70 @@ interface GameCanvasProps {
     height: number;
 }
 
+/** Sprite cache for loaded images */
+const spriteCache: Map<string, HTMLImageElement> = new Map();
+const spriteLoadPromises: Map<string, Promise<HTMLImageElement>> = new Map();
+
+/** Load a sprite image (cached) */
+function loadSprite(src: string): HTMLImageElement | null {
+    if (spriteCache.has(src)) {
+        return spriteCache.get(src)!;
+    }
+
+    if (!spriteLoadPromises.has(src)) {
+        const img = new Image();
+        const promise = new Promise<HTMLImageElement>((resolve, reject) => {
+            img.onload = () => {
+                spriteCache.set(src, img);
+                resolve(img);
+            };
+            img.onerror = reject;
+        });
+        img.src = src;
+        spriteLoadPromises.set(src, promise);
+    }
+
+    return null;
+}
+
+/** Get sprite for obstacle based on type and id */
+function getObstacleSprite(obstacle: Obstacle): string {
+    // Use obstacle ID to determine which sprite variant to use (deterministic)
+    const hash = obstacle.id.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
+
+    switch (obstacle.type) {
+        case ObstacleType.Coral:
+            const flowerNum = (hash % 3) + 1; // 1, 2, or 3
+            return `/flower${flowerNum}.png`;
+        case ObstacleType.IceBlock:
+            const iceNum = (hash % 2) + 1; // 1 or 2
+            return `/ice${iceNum}.png`;
+        case ObstacleType.SeaTurtle:
+            const turtNum = (hash % 3) + 1; // 1, 2, or 3
+            return `/turt${turtNum}.png`;
+        default:
+            return `/flower1.png`;
+    }
+}
+
+/** Preload all game sprites */
+function preloadSprites(): void {
+    const sprites = [
+        '/eject.png',
+        '/flower1.png',
+        '/flower2.png',
+        '/flower3.png',
+        '/hpitem.png',
+        '/ice1.png',
+        '/ice2.png',
+        '/ship.png',
+        '/turt1.png',
+        '/turt2.png',
+        '/turt3.png',
+    ];
+    sprites.forEach((src) => loadSprite(src));
+}
+
 /** Get water color based on depth (gradient from light blue to very dark) */
 function getWaterColor(depth: number): string {
     const normalizedDepth = Math.min(depth / MAX_DEPTH, 1);
@@ -43,6 +107,95 @@ function getDarknessOverlay(depth: number): number {
     const normalizedDepth = Math.min(depth / MAX_DEPTH, 1);
     // Exponential darkening - gets very dark at max depth
     return Math.pow(normalizedDepth, 0.5) * 0.7;
+}
+
+/** Get base obstacle visibility based on depth (100% at surface → 10% at max depth) */
+function getDepthVisibility(depth: number): number {
+    const normalizedDepth = Math.min(depth / MAX_DEPTH, 1);
+    // Linear interpolation from 1.0 (100%) to 0.1 (10%)
+    return 1.0 - normalizedDepth * 0.9;
+}
+
+/** Flashlight configuration */
+const FLASHLIGHT_CONFIG = {
+    coneAngle: Math.PI / 4, // 45 degree cone
+    range: 250, // How far the light reaches
+    coneWidth: 180, // Width at max range
+};
+
+/** Check if a point is within a submarine's flashlight cone */
+function isInFlashlight(
+    obstacleX: number,
+    obstacleY: number,
+    obstacleWidth: number,
+    obstacleHeight: number,
+    subX: number,
+    subY: number,
+    subWidth: number,
+    subHeight: number
+): boolean {
+    // Flashlight origin is at bottom center of submarine
+    const lightX = subX + subWidth / 2;
+    const lightY = subY + subHeight;
+
+    // Check multiple points on the obstacle
+    const checkPoints = [
+        { x: obstacleX + obstacleWidth / 2, y: obstacleY + obstacleHeight / 2 }, // Center
+        { x: obstacleX, y: obstacleY }, // Top-left
+        { x: obstacleX + obstacleWidth, y: obstacleY }, // Top-right
+    ];
+
+    for (const point of checkPoints) {
+        // Only illuminate obstacles BELOW the submarine
+        if (point.y < lightY) continue;
+
+        const dy = point.y - lightY;
+        const dx = Math.abs(point.x - lightX);
+
+        // Check if within range
+        if (dy > FLASHLIGHT_CONFIG.range) continue;
+
+        // Calculate cone width at this distance (expands with distance)
+        const coneWidthAtDistance = (dy / FLASHLIGHT_CONFIG.range) * FLASHLIGHT_CONFIG.coneWidth;
+
+        // Check if point is within cone
+        if (dx <= coneWidthAtDistance / 2 + obstacleWidth / 2) {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+/** Calculate final visibility for an obstacle considering depth and flashlights */
+function getObstacleVisibility(
+    obstacle: Obstacle,
+    players: Record<PlayerId, PlayerVehicle>
+): number {
+    const baseVisibility = getDepthVisibility(obstacle.y);
+
+    // Check if obstacle is lit by any submarine's flashlight
+    for (const player of Object.values(players)) {
+        if (player.state === PlayerState.Dead || player.state === PlayerState.Escaped) continue;
+        if (player.state === PlayerState.Ascending) continue; // Capsule has no flashlight
+
+        if (
+            isInFlashlight(
+                obstacle.x,
+                obstacle.y,
+                obstacle.width,
+                obstacle.height,
+                player.x,
+                player.y,
+                player.width,
+                player.height
+            )
+        ) {
+            return 1.0; // 100% visible in flashlight
+        }
+    }
+
+    return baseVisibility;
 }
 
 /** Determine camera mode and viewports based on player states */
@@ -90,37 +243,36 @@ function drawCargoShip(
 
     ctx.save();
 
-    // Ship hull (dark gray)
-    ctx.fillStyle = '#2A2A2A';
-    ctx.beginPath();
-    ctx.moveTo(centerX - 120, surfaceY - 20);
-    ctx.lineTo(centerX + 120, surfaceY - 20);
-    ctx.lineTo(centerX + 100, surfaceY + 30);
-    ctx.lineTo(centerX - 100, surfaceY + 30);
-    ctx.closePath();
-    ctx.fill();
+    // Try to use sprite
+    const sprite = loadSprite('/ship.png');
+    const shipWidth = 300;
+    const shipHeight = 150;
 
-    // Ship deck
-    ctx.fillStyle = '#4A4A4A';
-    ctx.fillRect(centerX - 110, surfaceY - 40, 220, 20);
+    if (sprite) {
+        ctx.drawImage(
+            sprite,
+            centerX - shipWidth / 2,
+            surfaceY - shipHeight + 30, // Position so bottom is at water line
+            shipWidth,
+            shipHeight
+        );
+    } else {
+        // Fallback to simple shape
+        ctx.fillStyle = '#2A2A2A';
+        ctx.beginPath();
+        ctx.moveTo(centerX - 120, surfaceY - 20);
+        ctx.lineTo(centerX + 120, surfaceY - 20);
+        ctx.lineTo(centerX + 100, surfaceY + 30);
+        ctx.lineTo(centerX - 100, surfaceY + 30);
+        ctx.closePath();
+        ctx.fill();
 
-    // Bridge
-    ctx.fillStyle = '#3A3A3A';
-    ctx.fillRect(centerX - 30, surfaceY - 70, 60, 30);
+        ctx.fillStyle = '#4A4A4A';
+        ctx.fillRect(centerX - 110, surfaceY - 40, 220, 20);
 
-    // Windows on bridge
-    ctx.fillStyle = '#88CCFF';
-    ctx.fillRect(centerX - 20, surfaceY - 60, 10, 10);
-    ctx.fillRect(centerX + 10, surfaceY - 60, 10, 10);
-
-    // Crane
-    ctx.strokeStyle = '#555';
-    ctx.lineWidth = 4;
-    ctx.beginPath();
-    ctx.moveTo(centerX + 60, surfaceY - 40);
-    ctx.lineTo(centerX + 60, surfaceY - 90);
-    ctx.lineTo(centerX + 100, surfaceY - 70);
-    ctx.stroke();
+        ctx.fillStyle = '#3A3A3A';
+        ctx.fillRect(centerX - 30, surfaceY - 70, 60, 30);
+    }
 
     // Surface water line
     ctx.fillStyle = 'rgba(135, 206, 235, 0.5)';
@@ -337,12 +489,28 @@ function drawCapsule(
     const screenY = player.y - cameraY + canvasHeight / 2;
 
     ctx.save();
-    ctx.fillStyle = color;
 
-    // Capsule body (rounded rectangle)
-    ctx.beginPath();
-    ctx.roundRect(player.x, screenY, player.width, player.height, 8);
-    ctx.fill();
+    // Try to use sprite
+    const sprite = loadSprite('/eject.png');
+
+    if (sprite) {
+        // Draw capsule sprite (scale to fit player dimensions)
+        const capsuleWidth = player.width * 1.5;
+        const capsuleHeight = player.height * 1.5;
+        ctx.drawImage(
+            sprite,
+            player.x - (capsuleWidth - player.width) / 2,
+            screenY - (capsuleHeight - player.height) / 2,
+            capsuleWidth,
+            capsuleHeight
+        );
+    } else {
+        // Fallback
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.roundRect(player.x, screenY, player.width, player.height, 8);
+        ctx.fill();
+    }
 
     // Bubbles rising up (visual only)
     ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
@@ -361,7 +529,8 @@ function drawObstacle(
     ctx: CanvasRenderingContext2D,
     obstacle: Obstacle,
     cameraY: number,
-    canvasHeight: number
+    canvasHeight: number,
+    visibility: number = 1.0
 ) {
     if (!obstacle.active) return;
 
@@ -372,81 +541,59 @@ function drawObstacle(
 
     ctx.save();
 
-    switch (obstacle.type) {
-        case ObstacleType.Coral:
-            ctx.fillStyle = COLORS.coral;
-            // Draw coral as jagged shape
-            ctx.beginPath();
-            ctx.moveTo(obstacle.x, screenY + obstacle.height);
-            ctx.lineTo(obstacle.x + obstacle.width * 0.3, screenY);
-            ctx.lineTo(obstacle.x + obstacle.width * 0.5, screenY + obstacle.height * 0.3);
-            ctx.lineTo(obstacle.x + obstacle.width * 0.7, screenY);
-            ctx.lineTo(obstacle.x + obstacle.width, screenY + obstacle.height);
-            ctx.closePath();
-            ctx.fill();
-            break;
+    // Apply visibility (lower opacity for harder to see obstacles)
+    ctx.globalAlpha = visibility;
 
-        case ObstacleType.IceBlock:
-            ctx.fillStyle = COLORS.ice;
-            ctx.strokeStyle = '#8BB8C8';
-            ctx.lineWidth = 2;
-            // Draw ice as angular polygon
-            ctx.beginPath();
-            ctx.moveTo(obstacle.x + obstacle.width * 0.1, screenY + obstacle.height);
-            ctx.lineTo(obstacle.x, screenY + obstacle.height * 0.3);
-            ctx.lineTo(obstacle.x + obstacle.width * 0.4, screenY);
-            ctx.lineTo(obstacle.x + obstacle.width * 0.8, screenY + obstacle.height * 0.1);
-            ctx.lineTo(obstacle.x + obstacle.width, screenY + obstacle.height * 0.5);
-            ctx.lineTo(obstacle.x + obstacle.width * 0.9, screenY + obstacle.height);
-            ctx.closePath();
-            ctx.fill();
-            ctx.stroke();
-            break;
+    // Try to use sprite
+    const spriteSrc = getObstacleSprite(obstacle);
+    const sprite = loadSprite(spriteSrc);
 
-        case ObstacleType.SeaTurtle:
-            ctx.fillStyle = COLORS.turtle;
-            // Draw turtle as oval body with flippers
-            ctx.beginPath();
-            ctx.ellipse(
-                obstacle.x + obstacle.width / 2,
-                screenY + obstacle.height / 2,
-                obstacle.width / 2,
-                obstacle.height / 2.5,
-                0,
-                0,
-                Math.PI * 2
-            );
-            ctx.fill();
-            // Head
-            ctx.beginPath();
-            const headX = obstacle.velocityX >= 0 ? obstacle.x + obstacle.width : obstacle.x;
-            ctx.arc(headX, screenY + obstacle.height / 2, obstacle.height / 4, 0, Math.PI * 2);
-            ctx.fill();
-            // Flippers
-            ctx.fillStyle = '#1B6B1B';
-            ctx.beginPath();
-            ctx.ellipse(
-                obstacle.x + obstacle.width * 0.2,
-                screenY + obstacle.height * 0.8,
-                8,
-                4,
-                -0.5,
-                0,
-                Math.PI * 2
-            );
-            ctx.fill();
-            ctx.beginPath();
-            ctx.ellipse(
-                obstacle.x + obstacle.width * 0.8,
-                screenY + obstacle.height * 0.8,
-                8,
-                4,
-                0.5,
-                0,
-                Math.PI * 2
-            );
-            ctx.fill();
-            break;
+    if (sprite) {
+        // Flip sprite based on velocity direction for turtles
+        const flipX = obstacle.type === ObstacleType.SeaTurtle && obstacle.velocityX < 0;
+
+        if (flipX) {
+            ctx.translate(obstacle.x + obstacle.width, screenY);
+            ctx.scale(-1, 1);
+            ctx.drawImage(sprite, 0, 0, obstacle.width, obstacle.height);
+        } else {
+            ctx.drawImage(sprite, obstacle.x, screenY, obstacle.width, obstacle.height);
+        }
+    } else {
+        // Fallback to simple shapes while sprites load
+        switch (obstacle.type) {
+            case ObstacleType.Coral:
+                ctx.fillStyle = COLORS.coral;
+                ctx.beginPath();
+                ctx.moveTo(obstacle.x, screenY + obstacle.height);
+                ctx.lineTo(obstacle.x + obstacle.width * 0.3, screenY);
+                ctx.lineTo(obstacle.x + obstacle.width * 0.5, screenY + obstacle.height * 0.3);
+                ctx.lineTo(obstacle.x + obstacle.width * 0.7, screenY);
+                ctx.lineTo(obstacle.x + obstacle.width, screenY + obstacle.height);
+                ctx.closePath();
+                ctx.fill();
+                break;
+
+            case ObstacleType.IceBlock:
+                ctx.fillStyle = COLORS.ice;
+                ctx.fillRect(obstacle.x, screenY, obstacle.width, obstacle.height);
+                break;
+
+            case ObstacleType.SeaTurtle:
+                ctx.fillStyle = COLORS.turtle;
+                ctx.beginPath();
+                ctx.ellipse(
+                    obstacle.x + obstacle.width / 2,
+                    screenY + obstacle.height / 2,
+                    obstacle.width / 2,
+                    obstacle.height / 2.5,
+                    0,
+                    0,
+                    Math.PI * 2
+                );
+                ctx.fill();
+                break;
+        }
     }
 
     ctx.restore();
@@ -625,6 +772,61 @@ function drawProjectile(
     ctx.restore();
 }
 
+/** Draw submarine flashlight cone */
+function drawFlashlight(
+    ctx: CanvasRenderingContext2D,
+    player: PlayerVehicle,
+    cameraY: number,
+    canvasHeight: number,
+    depth: number
+) {
+    // Only draw flashlight for descending submarines (not dead/escaped/ascending)
+    if (player.state !== PlayerState.Descending) return;
+
+    const screenY = player.y - cameraY + canvasHeight / 2;
+    const lightX = player.x + player.width / 2;
+    const lightY = screenY + player.height;
+
+    // Flashlight visibility increases with depth (more visible in darkness)
+    const normalizedDepth = Math.min(depth / MAX_DEPTH, 1);
+    const flashlightOpacity = 0.05 + normalizedDepth * 0.15; // 5% at surface, 20% at max depth
+
+    ctx.save();
+
+    // Create cone gradient
+    const gradient = ctx.createRadialGradient(
+        lightX,
+        lightY,
+        0,
+        lightX,
+        lightY + FLASHLIGHT_CONFIG.range,
+        FLASHLIGHT_CONFIG.coneWidth / 2
+    );
+    gradient.addColorStop(0, `rgba(255, 255, 200, ${flashlightOpacity * 2})`);
+    gradient.addColorStop(0.3, `rgba(255, 255, 180, ${flashlightOpacity})`);
+    gradient.addColorStop(1, 'rgba(255, 255, 150, 0)');
+
+    // Draw cone shape
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.moveTo(lightX, lightY);
+    ctx.lineTo(lightX - FLASHLIGHT_CONFIG.coneWidth / 2, lightY + FLASHLIGHT_CONFIG.range);
+    ctx.lineTo(lightX + FLASHLIGHT_CONFIG.coneWidth / 2, lightY + FLASHLIGHT_CONFIG.range);
+    ctx.closePath();
+    ctx.fill();
+
+    // Draw light source (small bright spot)
+    const spotGradient = ctx.createRadialGradient(lightX, lightY + 5, 0, lightX, lightY + 5, 15);
+    spotGradient.addColorStop(0, 'rgba(255, 255, 220, 0.8)');
+    spotGradient.addColorStop(1, 'rgba(255, 255, 200, 0)');
+    ctx.fillStyle = spotGradient;
+    ctx.beginPath();
+    ctx.arc(lightX, lightY + 5, 15, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.restore();
+}
+
 /** Draw a player (submarine or capsule) based on their state */
 function drawPlayer(
     ctx: CanvasRenderingContext2D,
@@ -677,6 +879,11 @@ function drawPlayer(
 export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
 
+    // Preload sprites on mount
+    useEffect(() => {
+        preloadSprites();
+    }, []);
+
     const draw = useCallback(() => {
         const canvas = canvasRef.current;
         if (!canvas) return;
@@ -724,9 +931,14 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
             // Draw Titanic
             drawTitanic(ctx, focusDepth, width, height);
 
-            // Draw obstacles
+            // Draw flashlight cones (before obstacles so they appear behind)
+            drawFlashlight(ctx, players.player1, focusDepth, height, focusDepth);
+            drawFlashlight(ctx, players.player2, focusDepth, height, focusDepth);
+
+            // Draw obstacles with visibility based on depth and flashlights
             for (const obstacle of obstacles) {
-                drawObstacle(ctx, obstacle, focusDepth, height);
+                const visibility = getObstacleVisibility(obstacle, players);
+                drawObstacle(ctx, obstacle, focusDepth, height, visibility);
             }
 
             // Draw projectiles
@@ -765,8 +977,14 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
                 ctx.translate(0, -halfHeight / 2);
 
                 drawTitanic(ctx, cameraY, width, height);
+
+                // Flashlights (ascending capsule has no flashlight, but we draw for consistency)
+                drawFlashlight(ctx, players.player1, cameraY, height, cameraY);
+                drawFlashlight(ctx, players.player2, cameraY, height, cameraY);
+
                 for (const obstacle of obstacles) {
-                    drawObstacle(ctx, obstacle, cameraY, height);
+                    const visibility = getObstacleVisibility(obstacle, players);
+                    drawObstacle(ctx, obstacle, cameraY, height, visibility);
                 }
                 for (const projectile of gameState.projectiles) {
                     drawProjectile(ctx, projectile, cameraY, height, gameState.frame);
@@ -815,8 +1033,14 @@ export function GameCanvas({ gameState, width, height }: GameCanvasProps) {
                 ctx.translate(0, -halfHeight / 2);
 
                 drawTitanic(ctx, cameraY, width, height);
+
+                // Flashlights
+                drawFlashlight(ctx, players.player1, cameraY, height, cameraY);
+                drawFlashlight(ctx, players.player2, cameraY, height, cameraY);
+
                 for (const obstacle of obstacles) {
-                    drawObstacle(ctx, obstacle, cameraY, height);
+                    const visibility = getObstacleVisibility(obstacle, players);
+                    drawObstacle(ctx, obstacle, cameraY, height, visibility);
                 }
                 for (const projectile of gameState.projectiles) {
                     drawProjectile(ctx, projectile, cameraY, height, gameState.frame);
