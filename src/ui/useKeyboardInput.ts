@@ -1,14 +1,171 @@
 /**
- * React hook for handling keyboard input for both players.
- * Maps physical keys to player actions in a hot-seat multiplayer setup.
+ * React hook for handling keyboard AND gamepad input for both players.
+ * Maps physical keys and gamepad buttons to player actions in a hot-seat multiplayer setup.
  *
- * Controls:
+ * Keyboard Controls:
  * Player 1: WASD movement, Q=eject, E=rocket, R=mine
  * Player 2: Arrow keys movement, /=eject, .=rocket, ,=mine
+ *
+ * Gamepad Controls (Standard layout):
+ * Movement: Left stick OR D-pad
+ * A/X button: Fire rocket
+ * B/Circle button: Deploy mine
+ * X/Square or Y/Triangle button: Eject
+ * RB/R1: Alternative rocket
+ * LB/L1: Alternative mine
  */
 
 import { useEffect, useRef, useCallback } from 'react';
 import type { PlayerInputFrame, PlayerId, PlayerAction } from '../engine/types';
+
+// ============ GAMEPAD SUPPORT ============
+
+// Dead zone for analog sticks (to prevent drift)
+const STICK_DEADZONE = 0.3;
+
+// Track previous button states for edge detection (fire once per press)
+const prevGamepadButtonStates: Record<number, Record<number, boolean>> = {};
+
+interface GamepadMovement {
+    up: boolean;
+    down: boolean;
+    left: boolean;
+    right: boolean;
+}
+
+interface GamepadInputResult {
+    movement: {
+        player1: GamepadMovement;
+        player2: GamepadMovement;
+    };
+    actions: {
+        player1: PlayerAction;
+        player2: PlayerAction;
+    };
+}
+
+/**
+ * Check if a button was just pressed (not held)
+ */
+function wasGamepadButtonJustPressed(
+    gamepadIndex: number,
+    buttonIndex: number,
+    currentPressed: boolean
+): boolean {
+    if (!prevGamepadButtonStates[gamepadIndex]) {
+        prevGamepadButtonStates[gamepadIndex] = {};
+    }
+
+    const wasPressed = prevGamepadButtonStates[gamepadIndex][buttonIndex] || false;
+    prevGamepadButtonStates[gamepadIndex][buttonIndex] = currentPressed;
+
+    // Return true only on the transition from not-pressed to pressed
+    return currentPressed && !wasPressed;
+}
+
+/**
+ * Get movement state from a gamepad
+ */
+function getGamepadMovement(gamepad: Gamepad): GamepadMovement {
+    const state: GamepadMovement = {
+        up: false,
+        down: false,
+        left: false,
+        right: false,
+    };
+
+    // Check analog stick (axes 0 and 1)
+    if (gamepad.axes.length >= 2) {
+        const horizontal = gamepad.axes[0];
+        const vertical = gamepad.axes[1];
+
+        if (horizontal < -STICK_DEADZONE) state.left = true;
+        if (horizontal > STICK_DEADZONE) state.right = true;
+        if (vertical < -STICK_DEADZONE) state.up = true;
+        if (vertical > STICK_DEADZONE) state.down = true;
+    }
+
+    // Check D-pad (buttons 12-15 on standard gamepad)
+    if (gamepad.buttons.length >= 16) {
+        if (gamepad.buttons[12]?.pressed) state.up = true;
+        if (gamepad.buttons[13]?.pressed) state.down = true;
+        if (gamepad.buttons[14]?.pressed) state.left = true;
+        if (gamepad.buttons[15]?.pressed) state.right = true;
+    }
+
+    return state;
+}
+
+/**
+ * Get action from a gamepad (rocket, mine, eject)
+ */
+function getGamepadAction(gamepad: Gamepad): PlayerAction {
+    const index = gamepad.index;
+
+    // A button (0) = Fire rocket
+    if (gamepad.buttons[0] && wasGamepadButtonJustPressed(index, 0, gamepad.buttons[0].pressed)) {
+        return 'fireRocket';
+    }
+
+    // B button (1) = Deploy mine
+    if (gamepad.buttons[1] && wasGamepadButtonJustPressed(index, 1, gamepad.buttons[1].pressed)) {
+        return 'deployMine';
+    }
+
+    // X button (2) or Y button (3) = Eject (dumpBallast)
+    if (gamepad.buttons[2] && wasGamepadButtonJustPressed(index, 2, gamepad.buttons[2].pressed)) {
+        return 'dumpBallast';
+    }
+    if (gamepad.buttons[3] && wasGamepadButtonJustPressed(index, 3, gamepad.buttons[3].pressed)) {
+        return 'dumpBallast';
+    }
+
+    // RB/R1 button (5) = Alternative rocket
+    if (gamepad.buttons[5] && wasGamepadButtonJustPressed(index, 5, gamepad.buttons[5].pressed)) {
+        return 'fireRocket';
+    }
+
+    // LB/L1 button (4) = Alternative mine
+    if (gamepad.buttons[4] && wasGamepadButtonJustPressed(index, 4, gamepad.buttons[4].pressed)) {
+        return 'deployMine';
+    }
+
+    return null;
+}
+
+/**
+ * Sample all connected gamepads
+ */
+function sampleGamepads(): GamepadInputResult {
+    const result: GamepadInputResult = {
+        movement: {
+            player1: { up: false, down: false, left: false, right: false },
+            player2: { up: false, down: false, left: false, right: false },
+        },
+        actions: {
+            player1: null,
+            player2: null,
+        },
+    };
+
+    const gamepads = navigator.getGamepads();
+
+    // Gamepad 0 = Player 1
+    if (gamepads[0]) {
+        result.movement.player1 = getGamepadMovement(gamepads[0]);
+        result.actions.player1 = getGamepadAction(gamepads[0]);
+    }
+
+    // Gamepad 1 = Player 2
+    if (gamepads[1]) {
+        result.movement.player2 = getGamepadMovement(gamepads[1]);
+        result.actions.player2 = getGamepadAction(gamepads[1]);
+    }
+
+    return result;
+}
+
+// ============ KEYBOARD SUPPORT ============
 
 /** Key mappings for Player 1 (WASD + QER) */
 const P1_KEYS = {
@@ -158,44 +315,79 @@ export function useKeyboardInput() {
         window.addEventListener('keydown', handleKeyDown);
         window.addEventListener('keyup', handleKeyUp);
 
+        // Handle gamepad connection events
+        const handleGamepadConnect = (e: GamepadEvent) => {
+            console.log(`🎮 Gamepad ${e.gamepad.index + 1} connected: ${e.gamepad.id}`);
+        };
+
+        const handleGamepadDisconnect = (e: GamepadEvent) => {
+            console.log(`🎮 Gamepad ${e.gamepad.index + 1} disconnected`);
+            // Clean up button state tracking
+            delete prevGamepadButtonStates[e.gamepad.index];
+        };
+
+        window.addEventListener('gamepadconnected', handleGamepadConnect);
+        window.addEventListener('gamepaddisconnected', handleGamepadDisconnect);
+
         return () => {
             window.removeEventListener('keydown', handleKeyDown);
             window.removeEventListener('keyup', handleKeyUp);
+            window.removeEventListener('gamepadconnected', handleGamepadConnect);
+            window.removeEventListener('gamepaddisconnected', handleGamepadDisconnect);
         };
     }, []);
 
     /**
      * Sample the current input state for both players.
+     * Combines keyboard and gamepad input.
      * This should be called once per game frame.
      * The action is consumed after sampling (single-fire).
      */
     const sampleInputs = useCallback((frame: number): Record<PlayerId, PlayerInputFrame> => {
-        const p1Action = actionPressed.current.player1;
-        const p2Action = actionPressed.current.player2;
+        // Get keyboard actions
+        let p1Action = actionPressed.current.player1;
+        let p2Action = actionPressed.current.player2;
 
-        // Reset action pressed flags after sampling
+        // Reset keyboard action pressed flags after sampling
         actionPressed.current.player1 = null;
         actionPressed.current.player2 = null;
+
+        // Get gamepad input
+        const gamepadInput = sampleGamepads();
+
+        // Merge gamepad actions (gamepad takes priority if keyboard action is null)
+        if (!p1Action && gamepadInput.actions.player1) {
+            p1Action = gamepadInput.actions.player1;
+        }
+        if (!p2Action && gamepadInput.actions.player2) {
+            p2Action = gamepadInput.actions.player2;
+        }
 
         return {
             player1: {
                 frame,
-                up: keyState.current.player1.up,
-                down: keyState.current.player1.down,
-                left: keyState.current.player1.left,
-                right: keyState.current.player1.right,
+                // Combine keyboard and gamepad movement (OR together)
+                up: keyState.current.player1.up || gamepadInput.movement.player1.up,
+                down: keyState.current.player1.down || gamepadInput.movement.player1.down,
+                left: keyState.current.player1.left || gamepadInput.movement.player1.left,
+                right: keyState.current.player1.right || gamepadInput.movement.player1.right,
                 action: p1Action,
             },
             player2: {
                 frame,
-                up: keyState.current.player2.up,
-                down: keyState.current.player2.down,
-                left: keyState.current.player2.left,
-                right: keyState.current.player2.right,
+                up: keyState.current.player2.up || gamepadInput.movement.player2.up,
+                down: keyState.current.player2.down || gamepadInput.movement.player2.down,
+                left: keyState.current.player2.left || gamepadInput.movement.player2.left,
+                right: keyState.current.player2.right || gamepadInput.movement.player2.right,
                 action: p2Action,
             },
         };
     }, []);
 
-    return { sampleInputs };
+    // Get connected gamepad count
+    const getGamepadCount = useCallback((): number => {
+        return navigator.getGamepads().filter((g) => g !== null).length;
+    }, []);
+
+    return { sampleInputs, getGamepadCount };
 }
