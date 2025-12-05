@@ -117,6 +117,9 @@ export class SoundEngine {
 
         // Whale-like sounds (very occasional)
         this.scheduleWhale();
+
+        // Background music (procedural ambient)
+        this.createAmbientMusic();
     }
 
     /**
@@ -228,6 +231,143 @@ export class SoundEngine {
 
         osc.start(now);
         osc.stop(now + duration);
+    }
+
+    /**
+     * Create ambient background music (procedural).
+     * Creates a haunting underwater atmosphere with minor key arpeggios.
+     */
+    private createAmbientMusic(): void {
+        if (!this.audioContext || !this.ambientGain) return;
+
+        // Schedule recurring musical phrases
+        this.scheduleMusicalPhrase();
+        this.schedulePadChord();
+    }
+
+    /**
+     * Schedule a musical phrase (arpeggio pattern).
+     */
+    private scheduleMusicalPhrase(): void {
+        if (!this.audioContext || !this.isInitialized) return;
+
+        const delay = 4000 + Math.random() * 4000; // Every 4-8 seconds
+
+        setTimeout(() => {
+            this.playArpeggio();
+            this.scheduleMusicalPhrase();
+        }, delay);
+    }
+
+    /**
+     * Schedule ambient pad chords.
+     */
+    private schedulePadChord(): void {
+        if (!this.audioContext || !this.isInitialized) return;
+
+        const delay = 8000 + Math.random() * 8000; // Every 8-16 seconds
+
+        setTimeout(() => {
+            this.playPadChord();
+            this.schedulePadChord();
+        }, delay);
+    }
+
+    /**
+     * Play a haunting arpeggio.
+     */
+    private playArpeggio(): void {
+        if (!this.audioContext || !this.ambientGain) return;
+
+        // Minor scale notes (in Hz) - A minor pentatonic transposed down
+        const notes = [110, 130.81, 146.83, 164.81, 196, 220]; // A2, C3, D3, E3, G3, A3
+        const numNotes = 4 + Math.floor(Math.random() * 3); // 4-6 notes
+        const noteSpacing = 0.15 + Math.random() * 0.1; // 150-250ms between notes
+
+        for (let i = 0; i < numNotes; i++) {
+            const noteIndex = Math.floor(Math.random() * notes.length);
+            const freq = notes[noteIndex];
+            const time = this.audioContext.currentTime + i * noteSpacing;
+
+            this.playNote(freq, time, 0.3 + Math.random() * 0.2);
+        }
+    }
+
+    /**
+     * Play a single note with envelope.
+     */
+    private playNote(freq: number, startTime: number, duration: number): void {
+        if (!this.audioContext || !this.ambientGain) return;
+
+        const osc = this.audioContext.createOscillator();
+        osc.type = 'sine';
+        osc.frequency.value = freq;
+
+        const gain = this.audioContext.createGain();
+        gain.gain.value = 0;
+
+        // Low pass for softer sound
+        const filter = this.audioContext.createBiquadFilter();
+        filter.type = 'lowpass';
+        filter.frequency.value = 800;
+        filter.Q.value = 1;
+
+        osc.connect(filter);
+        filter.connect(gain);
+        gain.connect(this.ambientGain);
+
+        // Soft attack/release envelope
+        gain.gain.setValueAtTime(0, startTime);
+        gain.gain.linearRampToValueAtTime(0.04, startTime + 0.05);
+        gain.gain.exponentialRampToValueAtTime(0.001, startTime + duration);
+
+        osc.start(startTime);
+        osc.stop(startTime + duration + 0.1);
+    }
+
+    /**
+     * Play an ambient pad chord.
+     */
+    private playPadChord(): void {
+        if (!this.audioContext || !this.ambientGain) return;
+
+        // Minor chord frequencies
+        const chords = [
+            [110, 130.81, 164.81], // Am
+            [98, 123.47, 146.83],  // Gm
+            [82.41, 103.83, 123.47], // Em
+            [73.42, 92.5, 110],    // Dm
+        ];
+
+        const chord = chords[Math.floor(Math.random() * chords.length)];
+        const now = this.audioContext.currentTime;
+        const duration = 3 + Math.random() * 2;
+
+        for (const freq of chord) {
+            const osc = this.audioContext.createOscillator();
+            osc.type = 'sine';
+            osc.frequency.value = freq;
+
+            const gain = this.audioContext.createGain();
+            gain.gain.value = 0;
+
+            const filter = this.audioContext.createBiquadFilter();
+            filter.type = 'lowpass';
+            filter.frequency.value = 400;
+
+            osc.connect(filter);
+            filter.connect(gain);
+            gain.connect(this.ambientGain);
+
+            // Very slow attack/release for pad effect
+            gain.gain.setValueAtTime(0, now);
+            gain.gain.linearRampToValueAtTime(0.015, now + 1);
+            gain.gain.linearRampToValueAtTime(0.01, now + duration - 1);
+            gain.gain.linearRampToValueAtTime(0, now + duration);
+
+            osc.start(now);
+            osc.stop(now + duration + 0.1);
+        }
     }
 
     /**

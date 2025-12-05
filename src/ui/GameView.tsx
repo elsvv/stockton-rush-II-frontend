@@ -240,7 +240,7 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
             // Delay before transitioning to results screen
             gameOverTimeoutRef.current = window.setTimeout(() => {
                 onGameOver(gameState);
-            }, 3000); // 3 second delay
+            }, 1500); // 1.5 second delay (faster)
         }
         
         return () => {
