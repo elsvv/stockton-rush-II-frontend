@@ -26,6 +26,11 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
     });
     const [audioInitialized, setAudioInitialized] = useState(false);
 
+    // Ready state - both players must press DOWN to start
+    const [player1Ready, setPlayer1Ready] = useState(false);
+    const [player2Ready, setPlayer2Ready] = useState(false);
+    const gameStarted = player1Ready && player2Ready;
+
     // Update canvas dimensions in config
     useEffect(() => {
         setCanvasDimensions(dimensions.width, dimensions.height);
@@ -40,12 +45,36 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
         })
     );
 
-    const { sampleInputs } = useKeyboardInput();
+    const { sampleInputs, sampleMovementOnly } = useKeyboardInput();
     const gameStateRef = useRef(gameState);
     const prevStateRef = useRef(gameState);
     const animationFrameRef = useRef<number | undefined>(undefined);
     const lastTimeRef = useRef<number>(0);
     const accumulatedTimeRef = useRef<number>(0);
+
+    // Request fullscreen mode on mount
+    useEffect(() => {
+        const requestFullscreen = async () => {
+            try {
+                if (document.documentElement.requestFullscreen && !document.fullscreenElement) {
+                    await document.documentElement.requestFullscreen();
+                }
+            } catch (e) {
+                console.log('Fullscreen request failed:', e);
+            }
+        };
+
+        // Small delay to ensure the component is mounted
+        const timer = setTimeout(requestFullscreen, 100);
+
+        return () => {
+            clearTimeout(timer);
+            // Exit fullscreen when leaving game
+            if (document.fullscreenElement) {
+                document.exitFullscreen().catch(() => {});
+            }
+        };
+    }, []);
 
     // Handle window resize
     useEffect(() => {
@@ -183,10 +212,30 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
                 accumulatedTimeRef.current = 0.2;
             }
 
+            // Check ready state before game starts
+            if (!gameStarted) {
+                // Use movement-only sampling to not consume action button states
+                const movement = sampleMovementOnly();
+
+                // Check if players pressed DOWN to ready up
+                if (movement.player1Down && !player1Ready) {
+                    setPlayer1Ready(true);
+                    soundEngine.playImpact('light');
+                }
+                if (movement.player2Down && !player2Ready) {
+                    setPlayer2Ready(true);
+                    soundEngine.playImpact('light');
+                }
+
+                // Keep animation frame going but don't update game
+                animationFrameRef.current = requestAnimationFrame(gameLoop);
+                return;
+            }
+
             let newState = gameStateRef.current;
             while (accumulatedTimeRef.current >= FIXED_DT) {
-                const inputs = sampleInputs(newState.frame);
-                newState = updateGameState(newState, inputs, FIXED_DT);
+                const frameInputs = sampleInputs(newState.frame);
+                newState = updateGameState(newState, frameInputs, FIXED_DT);
                 accumulatedTimeRef.current -= FIXED_DT;
             }
 
@@ -198,7 +247,7 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
                 animationFrameRef.current = requestAnimationFrame(gameLoop);
             }
         },
-        [sampleInputs]
+        [sampleInputs, sampleMovementOnly, gameStarted, player1Ready, player2Ready]
     );
 
     // Start/stop game loop
@@ -224,11 +273,105 @@ export function GameView({ seed, onGameOver }: GameViewProps) {
                 height: '100vh',
                 backgroundColor: '#0A1628',
                 overflow: 'hidden',
-                cursor: 'crosshair',
+                cursor: 'none',
             }}
         >
             <GameCanvas gameState={gameState} width={dimensions.width} height={dimensions.height} />
             <HUD gameState={gameState} />
+
+            {/* Ready overlay - shows until both players press DOWN */}
+            {!gameStarted && (
+                <div
+                    style={{
+                        position: 'absolute',
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        backgroundColor: 'rgba(0, 0, 0, 0.7)',
+                        zIndex: 100,
+                    }}
+                >
+                    <h1
+                        style={{
+                            fontSize: '48px',
+                            color: '#87CEEB',
+                            marginBottom: '20px',
+                            textShadow: '0 0 20px rgba(135, 206, 235, 0.5)',
+                        }}
+                    >
+                        🌊 GET READY! 🌊
+                    </h1>
+
+                    <p
+                        style={{
+                            fontSize: '20px',
+                            color: '#AAA',
+                            marginBottom: '40px',
+                        }}
+                    >
+                        Both players must press DOWN to dive!
+                    </p>
+
+                    <div style={{ display: 'flex', gap: '60px' }}>
+                        {/* Player 1 Ready Status */}
+                        <div
+                            style={{
+                                padding: '30px 50px',
+                                backgroundColor: player1Ready
+                                    ? 'rgba(255, 165, 0, 0.3)'
+                                    : 'rgba(0, 0, 0, 0.5)',
+                                border: `3px solid ${player1Ready ? '#FFA500' : '#444'}`,
+                                borderRadius: '16px',
+                                textAlign: 'center',
+                                transition: 'all 0.3s',
+                            }}
+                        >
+                            <div
+                                style={{ fontSize: '24px', color: '#FFA500', marginBottom: '10px' }}
+                            >
+                                PLAYER 1
+                            </div>
+                            <div style={{ fontSize: '40px' }}>{player1Ready ? '✅' : '⬇️'}</div>
+                            <div style={{ fontSize: '14px', color: '#888', marginTop: '10px' }}>
+                                {player1Ready ? 'READY!' : 'Press S or ↓'}
+                            </div>
+                        </div>
+
+                        {/* Player 2 Ready Status */}
+                        <div
+                            style={{
+                                padding: '30px 50px',
+                                backgroundColor: player2Ready
+                                    ? 'rgba(0, 255, 127, 0.3)'
+                                    : 'rgba(0, 0, 0, 0.5)',
+                                border: `3px solid ${player2Ready ? '#00FF7F' : '#444'}`,
+                                borderRadius: '16px',
+                                textAlign: 'center',
+                                transition: 'all 0.3s',
+                            }}
+                        >
+                            <div
+                                style={{ fontSize: '24px', color: '#00FF7F', marginBottom: '10px' }}
+                            >
+                                PLAYER 2
+                            </div>
+                            <div style={{ fontSize: '40px' }}>{player2Ready ? '✅' : '⬇️'}</div>
+                            <div style={{ fontSize: '14px', color: '#888', marginTop: '10px' }}>
+                                {player2Ready ? 'READY!' : 'Press S or ↓'}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div style={{ marginTop: '40px', color: '#666', fontSize: '14px' }}>
+                        🎮 Gamepad: Press Down on D-pad or Left Stick
+                    </div>
+                </div>
+            )}
 
             {/* Controls hint */}
             <div

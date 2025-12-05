@@ -78,8 +78,8 @@ function generatePickupId(): string {
     return `pickup_${pickupIdCounter++}`;
 }
 
-/** Ammo pickup chance (lower than HP) */
-const AMMO_PICKUP_CHANCE = 0.003; // Per frame per depth segment
+/** Ammo pickup chance (even rarer than HP) */
+const AMMO_PICKUP_CHANCE = 0.0001; // Very rare - about 1 per 1000m
 
 /** Create a pickup at a given position */
 function createPickup(type: PickupType, x: number, y: number): Pickup {

@@ -3,7 +3,7 @@
  * Fullscreen with animated background and gamepad support.
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { generateRandomSeed } from '../engine/rng';
 
 interface MainMenuProps {
@@ -22,13 +22,42 @@ export function MainMenu({ onStartGame }: MainMenuProps) {
     const canvasRef = useRef<HTMLCanvasElement>(null);
     const animationRef = useRef<number>(0);
 
-    // Poll gamepads
+    const handleStart = useCallback(() => {
+        const seed = customSeed.trim()
+            ? parseInt(customSeed, 10) || generateRandomSeed()
+            : generateRandomSeed();
+        onStartGame(seed);
+    }, [customSeed, onStartGame]);
+
+    const canStartWithGamepads = gamepads.length >= 2;
+
+    // Poll gamepads and check for X button to start game
     useEffect(() => {
+        let prevButtonStates: boolean[] = [];
+
         const checkGamepads = () => {
-            setGamepads(getConnectedGamepads());
+            const connected = getConnectedGamepads();
+            setGamepads(connected);
+
+            // Check for X button (button 2) press on any gamepad to start game
+            // Only if 2 gamepads are connected
+            if (connected.length >= 2) {
+                for (const gp of connected) {
+                    const xPressed = gp.buttons[2]?.pressed || false;
+                    const wasPressed = prevButtonStates[gp.index] || false;
+
+                    // Start game on button press (not hold)
+                    if (xPressed && !wasPressed) {
+                        handleStart();
+                        return;
+                    }
+
+                    prevButtonStates[gp.index] = xPressed;
+                }
+            }
         };
 
-        const interval = setInterval(checkGamepads, 500);
+        const interval = setInterval(checkGamepads, 100); // Faster polling for button detection
         checkGamepads();
 
         const handleConnect = () => checkGamepads();
@@ -42,7 +71,7 @@ export function MainMenu({ onStartGame }: MainMenuProps) {
             window.removeEventListener('gamepadconnected', handleConnect);
             window.removeEventListener('gamepaddisconnected', handleDisconnect);
         };
-    }, []);
+    }, [handleStart]);
 
     // Animated background
     useEffect(() => {
@@ -138,15 +167,6 @@ export function MainMenu({ onStartGame }: MainMenuProps) {
         window.addEventListener('resize', handleResize);
         return () => window.removeEventListener('resize', handleResize);
     }, []);
-
-    const handleStart = () => {
-        const seed = customSeed.trim()
-            ? parseInt(customSeed, 10) || generateRandomSeed()
-            : generateRandomSeed();
-        onStartGame(seed);
-    };
-
-    const canStartWithGamepads = gamepads.length >= 2;
 
     return (
         <div

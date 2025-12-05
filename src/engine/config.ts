@@ -107,7 +107,7 @@ export const ROCKET_HEIGHT = 8;
 export const MINE_SIZE = 25;
 
 /** HP Pickup configuration */
-export const HP_PICKUP_CHANCE = 0.002; // Per frame chance to spawn
+export const HP_PICKUP_CHANCE = 0.0003; // Very rare - about 1 per 300m
 export const HP_PICKUP_SIZE = 20;
 export const HP_PICKUP_HEAL = 1;
 

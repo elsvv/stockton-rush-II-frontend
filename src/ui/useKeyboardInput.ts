@@ -389,5 +389,52 @@ export function useKeyboardInput() {
         return navigator.getGamepads().filter((g) => g !== null).length;
     }, []);
 
-    return { sampleInputs, getGamepadCount };
+    /**
+     * Sample only movement inputs (no actions) - used for ready check.
+     * This doesn't consume action button states.
+     */
+    const sampleMovementOnly = useCallback((): { player1Down: boolean; player2Down: boolean } => {
+        // Check keyboard
+        const p1KeyDown = keyState.current.player1.down;
+        const p2KeyDown = keyState.current.player2.down;
+
+        // Check gamepads (just movement, no button state tracking)
+        let p1GamepadDown = false;
+        let p2GamepadDown = false;
+
+        const gamepads = navigator.getGamepads();
+
+        // Gamepad 0 = Player 1
+        if (gamepads[0]) {
+            const gp = gamepads[0];
+            // Check stick
+            if (gp.axes.length >= 2 && gp.axes[1] > STICK_DEADZONE) {
+                p1GamepadDown = true;
+            }
+            // Check D-pad
+            if (gp.buttons.length >= 14 && gp.buttons[13]?.pressed) {
+                p1GamepadDown = true;
+            }
+        }
+
+        // Gamepad 1 = Player 2
+        if (gamepads[1]) {
+            const gp = gamepads[1];
+            // Check stick
+            if (gp.axes.length >= 2 && gp.axes[1] > STICK_DEADZONE) {
+                p2GamepadDown = true;
+            }
+            // Check D-pad
+            if (gp.buttons.length >= 14 && gp.buttons[13]?.pressed) {
+                p2GamepadDown = true;
+            }
+        }
+
+        return {
+            player1Down: p1KeyDown || p1GamepadDown,
+            player2Down: p2KeyDown || p2GamepadDown,
+        };
+    }, []);
+
+    return { sampleInputs, getGamepadCount, sampleMovementOnly };
 }
