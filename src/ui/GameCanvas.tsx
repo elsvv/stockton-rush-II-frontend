@@ -24,8 +24,11 @@ interface GameCanvasProps {
     height: number;
 }
 
-/** Sprite cache for loaded images */
-const spriteCache: Map<string, HTMLImageElement> = new Map();
+/** Base URL from Vite config */
+const BASE_URL = import.meta.env.BASE_URL;
+
+/** Sprite cache */
+const spriteCache = new Map<string, HTMLImageElement>();
 const spriteLoadPromises: Map<string, Promise<HTMLImageElement>> = new Map();
 
 /** Load a sprite image (cached) */
@@ -58,32 +61,32 @@ function getObstacleSprite(obstacle: Obstacle): string {
     switch (obstacle.type) {
         case ObstacleType.Coral:
             const flowerNum = (hash % 3) + 1; // 1, 2, or 3
-            return `/flower${flowerNum}.png`;
+            return `${BASE_URL}flower${flowerNum}.png`;
         case ObstacleType.IceBlock:
             const iceNum = (hash % 2) + 1; // 1 or 2
-            return `/ice${iceNum}.png`;
+            return `${BASE_URL}ice${iceNum}.png`;
         case ObstacleType.SeaTurtle:
             const turtNum = (hash % 3) + 1; // 1, 2, or 3
-            return `/turt${turtNum}.png`;
+            return `${BASE_URL}turt${turtNum}.png`;
         default:
-            return `/flower1.png`;
+            return `${BASE_URL}flower1.png`;
     }
 }
 
 /** Preload all game sprites */
 function preloadSprites(): void {
     const sprites = [
-        '/eject.png',
-        '/flower1.png',
-        '/flower2.png',
-        '/flower3.png',
-        '/hpitem.png',
-        '/ice1.png',
-        '/ice2.png',
-        '/ship.png',
-        '/turt1.png',
-        '/turt2.png',
-        '/turt3.png',
+        `${BASE_URL}eject.png`,
+        `${BASE_URL}flower1.png`,
+        `${BASE_URL}flower2.png`,
+        `${BASE_URL}flower3.png`,
+        `${BASE_URL}hpitem.png`,
+        `${BASE_URL}ice1.png`,
+        `${BASE_URL}ice2.png`,
+        `${BASE_URL}ship.png`,
+        `${BASE_URL}turt1.png`,
+        `${BASE_URL}turt2.png`,
+        `${BASE_URL}turt3.png`,
     ];
     sprites.forEach((src) => loadSprite(src));
 }
@@ -248,7 +251,7 @@ function drawCargoShip(
     ctx.save();
 
     // Try to use sprite
-    const sprite = loadSprite('/ship.png');
+    const sprite = loadSprite(`${BASE_URL}ship.png`);
     const shipWidth = 300;
     const shipHeight = 150;
 
@@ -495,7 +498,7 @@ function drawCapsule(
     ctx.save();
 
     // Try to use sprite
-    const sprite = loadSprite('/eject.png');
+    const sprite = loadSprite(`${BASE_URL}eject.png`);
 
     if (sprite) {
         // Draw capsule sprite (scale to fit player dimensions)
@@ -810,7 +813,7 @@ function drawPickup(
 
     if (pickup.type === PickupType.Health) {
         // Health pickup - use sprite or draw heart
-        const sprite = loadSprite('/hpitem.png');
+        const sprite = loadSprite(`${BASE_URL}hpitem.png`);
 
         glow.addColorStop(0, 'rgba(255, 100, 100, 0.4)');
         glow.addColorStop(1, 'rgba(255, 100, 100, 0)');
