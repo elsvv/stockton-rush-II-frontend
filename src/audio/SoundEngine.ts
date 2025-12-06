@@ -108,6 +108,7 @@ export class SoundEngine {
         noiseSource.connect(noiseFilter);
         noiseFilter.connect(noiseGain);
         noiseGain.connect(this.depthFilter);
+        noiseSource.start();
         noiseLFO.start();
 
         this.ambientNodes.push(noiseSource, noiseLFO, noiseFilter, noiseGain, noiseLFOGain);

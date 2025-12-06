@@ -462,8 +462,12 @@ function createAnglerFish(
     canvasWidth: number
 ): AnglerFish {
     const side = rngNext() > 0.5 ? 'left' : 'right';
-    const x = side === 'left' ? -ANGLER_FISH_WIDTH : canvasWidth + ANGLER_FISH_WIDTH;
-    const y = depth + (rngNext() - 0.5) * 200; // Some vertical offset
+    // Spawn on visible edges of screen (not far outside)
+    const x = side === 'left' ? 50 : canvasWidth - 50;
+    const y = depth + (rngNext() - 0.5) * 300; // Spawn near player depth
+    
+    // Initial velocity towards center of screen
+    const initialVelocityX = side === 'left' ? 30 : -30;
     
     return {
         id: generateAnglerFishId(),
@@ -471,7 +475,7 @@ function createAnglerFish(
         y,
         width: ANGLER_FISH_WIDTH,
         height: ANGLER_FISH_HEIGHT,
-        velocityX: 0,
+        velocityX: initialVelocityX,
         velocityY: 0,
         targetPlayerId: null,
         aggroRadius: ANGLER_FISH_AGGRO_RADIUS,
